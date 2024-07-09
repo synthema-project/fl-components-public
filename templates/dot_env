@@ -1,0 +1,7 @@
+PYTHONPATH=${PYTHONPATH}:.
+MYPYPATH=${MYPYPATH}:.
+PYTHONDONTWRITEBYTECODE=True
+
+MLFLOW_URL=http://localhost:30246
+NODE_NAME=test_node
+DATA_PATH=/Users/borja/Projects/synthema/wp2/fl-components/common/data/iris.csv
