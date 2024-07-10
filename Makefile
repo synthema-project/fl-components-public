@@ -25,7 +25,7 @@ run-superlink:
 	poetry run flower-superlink --insecure
 
 run-fl-server:
-	poetry run flower-server-app --insecure fl_server.src.main:app
+	poetry run python fl_server/src/main.py
 
 run-fl-client:
 	poetry run flower-client-app --insecure fl_client.src.main:app

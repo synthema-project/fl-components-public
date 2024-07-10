@@ -8,3 +8,14 @@ class Task(BaseModel):
     model_version: int
     experiment_name: str
     run_name: str
+
+
+def _get_dummy_task() -> Task:
+    return Task(
+        id=1,
+        use_case="iris",
+        model_name="iris_model",
+        model_version=1,
+        experiment_name="iris",
+        run_name="run1",
+    )

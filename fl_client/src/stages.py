@@ -39,7 +39,7 @@ def load_model(
     )
 
 
-def set_run_config(experiment_id: int, run_id: int, global_vars: dict) -> None:
+def set_run_config(experiment_id: str, run_id: str, global_vars: dict) -> None:
     global_vars["mlflow_experiment_id"] = experiment_id
     global_vars["mlflow_run_id"] = run_id
 

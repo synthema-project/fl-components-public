@@ -34,4 +34,6 @@ if __name__ == "__main__":
         registered_model_name="iris_model",
     )
     mlflow_client = MlflowClient(tracking_uri="http://localhost:30246")
-    mlflow_client.set_model_version_tag("iris_model", model_info.registered_model_version, "use_case", "iris")
+    mlflow_client.set_model_version_tag(
+        "iris_model", model_info.registered_model_version, "use_case", "iris"
+    )
