@@ -26,10 +26,10 @@ Extending the code requires a set of tools to be present in your machine:
 
 1. Poetry
 1. Make
-1. A running mlflow server -> check the docs within [synthema](https://github.com/synthema-project/model-experiment_registries) for a local mlflow deployment on K8s or use docker container directly through the command
+1. A running mlflow server -> check the repo for [mlflow](https://github.com/synthema-project/model-experiment_registries) for a local mlflow deployment on K8s or use docker container directly through the command
 
 ```bash
-docker run -p 5000:5000 mlflow/mlflow
+docker run -p 5000:5000 ghcr.io/mlflow/mlflow
 ```
 
 ### Setting up the environment
@@ -39,9 +39,11 @@ There are several configuration options that need to be established in order to 
 The process is as follows:
 
 1. Clone the repository
-1. Copy the .env from the templates folder with `cp templates/dot_env .env` and sync it with your IDE. (In vscode this is done automatically if the file is named ".env")
+1. Copy the .env from the templates folder with `cp templates/dot_env .env` and sync it with your IDE. (In vscode this is done automatically if the file is named ".env"). Note that the path appended to both PYTHONPATH and MYPYPATH must be the parent dir of this project.
 1. Open the file "pyproject.toml" and look for the [tool.pytest_env] section -> adapt this section at will or use environmental variables for your tests
 1. Run the command `make install` to install all dependencies using poetry
+
+**Note that make install runs `poetry install` and creates a virtual environment by default in the home directory, if you want to set the project dir as the parent folder for the venv, then make sure to [config poetry](https://python-poetry.org/docs/configuration/#virtualenvsin-project).**
 
 
 ### Running tests and code checks
@@ -60,7 +62,7 @@ make test
 To run an end to end example, the easiest option is to run the preloaded model targeting a classification task on the iris dataset.
 
 1. Go to common/fl_models/iris/fl_model.py and run it to upload a federated model into mlflow. Bear in mind that you should change the url in there.
-1. Go to fl_server/src/main.py and modify the commands load_model and require_load_model to target the version returned in the console with the previous step.
+1. Go to fl_server/src/main.py and modify the calls to load_model and require_load_model to target the version returned in the console with the previous step.
 1. Open a console to run the command `make run-superlink`
 1. Open a console and run the following commands
     ```bash
@@ -70,7 +72,7 @@ To run an end to end example, the easiest option is to run the preloaded model t
 1. Open a console and run the following commands
     ```bash
     export $(grep -v '^#' .env | xargs)
-    make run-fl-sever
+    make run-fl-server
     ```
 
 Note that not all environmental variables are necessary in the case of the fl-server.
