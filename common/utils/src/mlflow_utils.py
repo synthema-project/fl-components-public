@@ -14,7 +14,7 @@ def setup_mlflow(mlflow_module: mlflow, tracking_url: str) -> MlflowClient:
 def load_mlflow_model(
     mlflow_client: mlflow.MlflowClient,
     model_name: str,
-    model_version: str | int,
+    model_version: int,
 ) -> tuple[PyFuncModel, ModelVersion]:
     mlflow_model: PyFuncModel = load_model(f"models:/{model_name}/{model_version}")
     model_meta = mlflow_client.get_model_version(name=model_name, version=model_version)
@@ -25,15 +25,11 @@ def upload_final_state(
     mlflow: mlflow,
     local_learner: Module,
     model_meta: ModelVersion,
-    experiment_id: str,
     run_id: str,
 ) -> ModelInfo:
-    assert experiment_id is not None
-    # Set the experiment to the model name
-    mlflow.set_experiment(experiment_id=experiment_id)
-
-    # Set the run's name to the model name
-    with mlflow.start_run(run_id=run_id):
+    with mlflow.start_run(
+        run_id=run_id,
+    ):
         model_info: mlflow.models.model.ModelInfo = mlflow.pytorch.log_model(
             pytorch_model=local_learner,
             artifact_path="model",
@@ -55,3 +51,13 @@ def register_model_metadata(
         meta[0].name, meta[0].version, "use_case", model_meta.tags["use_case"]
     )
     mlflow_client.set_model_version_tag(meta[0].name, meta[0].version, "trained", True)
+
+
+def log_metrics(
+    mlflow_module: mlflow,
+    metrics: dict,
+    step: int,
+    run_id: str,
+) -> None:
+    with mlflow_module.start_run(run_id=run_id):
+        mlflow_module.log_metrics(metrics, step=step)

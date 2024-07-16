@@ -59,8 +59,8 @@ def test_upload_final_state(
     local_learner = fl_model.create_local_learner()
     model_info, model_version = register_fl_model
     # Set up the necessary inputs for the function
-    experiment_id, run_id = experiment_and_run
-    upload_final_state(mlflow, local_learner, model_version, experiment_id, run_id)
+    _, run_id = experiment_and_run
+    upload_final_state(mlflow, local_learner, model_version, run_id)
 
     # Perform assertions on the output or check if the model is logged in MLflow
     assert model_info is not None

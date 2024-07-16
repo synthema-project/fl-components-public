@@ -2,6 +2,7 @@ import mlflow
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
 from mlflow.models.model import ModelInfo
+from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 from fl_client.src.config import DATA_PATH
 from common.utils.src.mlflow_utils import (
     load_mlflow_model,
@@ -25,7 +26,7 @@ def prepare_data(global_vars: dict) -> None:
 
 def load_model(
     model_name: str,
-    model_version: str | int,
+    model_version: int,
     mlflow_client: mlflow.MlflowClient,
     global_vars: dict,
 ) -> None:
@@ -39,18 +40,40 @@ def load_model(
     )
 
 
-def set_run_config(experiment_id: str, run_id: str, global_vars: dict) -> None:
+def set_run_config(
+    mlflow_client: mlflow.MlflowClient,
+    experiment_id: str,
+    run_id: str,
+    global_vars: dict,
+) -> None:
     global_vars["mlflow_experiment_id"] = experiment_id
-    global_vars["mlflow_run_id"] = run_id
+    run = mlflow_client.create_run(
+        experiment_id=experiment_id,
+        run_name=global_vars["node_name"],
+        tags={MLFLOW_PARENT_RUN_ID: run_id},
+    )
+    from mlflow.data.meta_dataset import MetaDataset
+    from mlflow.data.http_dataset_source import HTTPDatasetSource
+
+    source = HTTPDatasetSource(f"{global_vars['node_name']}://{DATA_PATH}")
+    # source._get_source_type = lambda: "local"
+    dataset = MetaDataset(source)
+    with mlflow.start_run(run_id=run.info.run_id):
+        mlflow.log_input(dataset, "training")
+    global_vars["mlflow_run_id"] = run.info.run_id
 
 
 def train_model(
     global_vars: dict,
+    current_global_iter: int,
+    mlflow_module: mlflow,
 ) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
     metrics = local_learner.train()
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Unexpected metrics type: {type(metrics)}")
+    with mlflow_module.start_run(run_id=global_vars["mlflow_run_id"]):
+        mlflow_module.log_metrics(metrics, step=current_global_iter)
     return metrics
 
 
@@ -87,11 +110,12 @@ def upload_model(
     local_learner = global_vars["local_learner"]
     set_model_parameters(latest_parameters, global_vars)
     model_meta = global_vars["model_meta"]
-    mlflow_experiment_id = global_vars["mlflow_experiment_id"]
     mlflow_run_id = global_vars["mlflow_run_id"]
 
+    parent_run_id = mlflow_client.get_parent_run(mlflow_run_id).info.run_id
+
     model_info: ModelInfo = upload_final_state(
-        mlflow_module, local_learner, model_meta, mlflow_experiment_id, mlflow_run_id
+        mlflow_module, local_learner, model_meta, parent_run_id
     )
     register_model_metadata(mlflow_client, model_meta)
     return model_info

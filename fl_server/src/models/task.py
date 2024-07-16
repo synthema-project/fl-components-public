@@ -15,7 +15,7 @@ def _get_dummy_task() -> Task:
         id=1,
         use_case="iris",
         model_name="iris_model",
-        model_version=1,
+        model_version=3,
         experiment_name="iris",
         run_name="run1",
     )

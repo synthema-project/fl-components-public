@@ -1,7 +1,7 @@
 import mlflow
 from flwr.client import ClientApp
 from flwr.common import Context, Message
-from fl_client.src.config import MLFLOW_URL
+from fl_client.src.config import MLFLOW_URL, NODE_NAME
 from fl_client.src.interface import (
     get_parameters_if,
     load_data_if,
@@ -24,6 +24,7 @@ global_vars = {
     "use_case": None,
     "mlflow_experiment_id": None,
     "mlflow_run_id": None,
+    "node_name": NODE_NAME,
 }
 
 app = ClientApp()
@@ -64,7 +65,7 @@ def query(msg: Message, ctx: Context) -> Message:
         return set_parameters_if(msg, global_vars)
 
     elif mode == "set_run_config":
-        return set_run_config_if(msg, global_vars)
+        return set_run_config_if(msg, mlflow_client, global_vars)
 
     elif mode == "prepare_data":
         return prepare_data_if(msg, global_vars)
@@ -79,7 +80,7 @@ def query(msg: Message, ctx: Context) -> Message:
 @app.train()
 def train(msg: Message, ctx: Context) -> Message:
     global global_vars
-    return train_model_if(msg, global_vars)
+    return train_model_if(msg, mlflow, global_vars)
 
 
 @app.evaluate()

@@ -154,9 +154,12 @@ def require_set_run_config(
 
 
 def require_train_model(
-    driver: Driver, node_ids: list[int], parametersrecord: ParametersRecord
+    driver: Driver,
+    node_ids: list[int],
+    parametersrecord: ParametersRecord,
+    current_global_iter: int,
 ) -> list[tuple[ParametersRecord, MetricsRecord]]:
-    recordset = create_train_model_recordset(parametersrecord)
+    recordset = create_train_model_recordset(parametersrecord, current_global_iter)
     # Create messages
     messages = create_messages(
         driver, recordset, MessageType.TRAIN, node_ids, "train_model", DEFAULT_TTL

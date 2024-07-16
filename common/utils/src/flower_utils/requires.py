@@ -88,7 +88,12 @@ def create_set_run_recordset(experiment_id: int, run_id: int):
     )
 
 
-def create_train_model_recordset(parametersrecord: ParametersRecord):
+def create_train_model_recordset(
+    parametersrecord: ParametersRecord, current_global_iter: int
+):
     return RecordSet(
         parameters_records={"parameters": parametersrecord},
+        configs_records={
+            "config": ConfigsRecord({"current_global_iter": current_global_iter})
+        },
     )

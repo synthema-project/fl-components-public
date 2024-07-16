@@ -55,10 +55,19 @@ def upload_model_if(
     return create_upload_model_response(msg, model_info.model_uuid, model_info.run_id)
 
 
-def train_model_if(msg: Message, global_vars: dict) -> Message:
+def train_model_if(msg: Message, mlflow_module: mlflow, global_vars: dict) -> Message:
     latest_parameters: ParametersRecord = msg.content.parameters_records["parameters"]
+    current_global_iter = msg.content.configs_records["config"]["current_global_iter"]
+    if not isinstance(current_global_iter, int):
+        raise TypeError(
+            f"Current global iteration must be an integer, got {type(current_global_iter)}"
+        )
     set_model_parameters(latest_parameters, global_vars)
-    metrics = train_model(global_vars)
+    metrics = train_model(global_vars, current_global_iter, mlflow_module)
+    assert (
+        global_vars["mlflow_experiment_id"] is not None
+        and global_vars["mlflow_run_id"] is not None
+    )
     latest_parameters = get_model_parameters(global_vars)
     return create_train_response(msg, latest_parameters, metrics)
 
@@ -74,12 +83,14 @@ def set_parameters_if(msg: Message, global_vars: dict) -> Message:
     return create_success_response(msg, "set parameters successfully")
 
 
-def set_run_config_if(msg: Message, global_vars: dict) -> Message:
+def set_run_config_if(
+    msg: Message, mlflow_client: MlflowClient, global_vars: dict
+) -> Message:
     experiment_id = msg.content.configs_records["config"]["experiment_id"]
     run_id = msg.content.configs_records["config"]["run_id"]
     if not isinstance(experiment_id, str) or not isinstance(run_id, str):
         raise TypeError(
-            f"Experiment ID and run ID must be int, got {type(experiment_id)} and {type(run_id)}"
+            f"Experiment ID and run ID must be str, got {type(experiment_id)} and {type(run_id)}"
         )
-    set_run_config(experiment_id, run_id, global_vars)
+    set_run_config(mlflow_client, experiment_id, run_id, global_vars)
     return create_success_response(msg, "set run config successfully")

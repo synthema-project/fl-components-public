@@ -1,6 +1,6 @@
 from typing import Any
 import mlflow
-from flwr.common import Message, ParametersRecord
+from flwr.common import Message, ParametersRecord, MetricsRecord
 
 from common.utils.src.mlflow_utils import load_mlflow_model
 
@@ -24,8 +24,17 @@ def aggregate_parameters(
     global_vars: dict[str, Any],
 ) -> ParametersRecord:
     aggregator = global_vars["aggregator"]
-    agg_parameters = aggregator.aggregate(parameter_list)
+    agg_parameters = aggregator.aggregate_parameters(parameter_list)
     return agg_parameters
+
+
+def aggregate_metrics(
+    metrics_list: list[MetricsRecord],
+    global_vars: dict[str, Any],
+) -> dict[str, Any]:
+    aggregator = global_vars["aggregator"]
+    agg_metrics = aggregator.aggregate_metrics(metrics_list)
+    return agg_metrics
 
 
 def filter_clients(
