@@ -1,9 +1,8 @@
 import enum
-from typing import List, Self
+from typing import Self
 from datetime import datetime
 
-from sqlmodel import SQLModel, Field, Column, String, Enum
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlmodel import SQLModel, Field, Column, Enum
 from pydantic_core import from_json
 
 

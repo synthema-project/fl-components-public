@@ -22,7 +22,6 @@ def event_handler(channel, method_frame, header_frame, body):
     run_server_app(app)
 
 
-
 if __name__ == "__main__":
     configure()
     while True:
