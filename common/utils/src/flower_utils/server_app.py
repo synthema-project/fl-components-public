@@ -1,18 +1,26 @@
+from typing import Optional
+from logging import INFO
+
 from flwr.common import event, EventType, Context, RecordSet
 from flwr.server.driver import GrpcDriver
 from flwr.server import ServerApp
 from flwr.common.logger import update_console_handler
-from logging import INFO
 
 
-def run_server_app(server_app: ServerApp, superlink_url: str = "0.0.0.0:9091") -> None:
+def run_server_app(
+    server_app: ServerApp,
+    superlink_url: str = "0.0.0.0:9091",
+    root_certificates: Optional[bytes] = None,
+) -> None:
     update_console_handler(
         level=INFO,
         timestamps=True,
         colored=True,
     )
 
-    driver = GrpcDriver(driver_service_address=superlink_url, root_certificates=None)
+    driver = GrpcDriver(
+        driver_service_address=superlink_url, root_certificates=root_certificates
+    )
 
     context = Context(state=RecordSet())
     server_app(driver, context)

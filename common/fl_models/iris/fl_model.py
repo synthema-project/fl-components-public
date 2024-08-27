@@ -4,11 +4,11 @@ from mlflow.pyfunc import PythonModel
 from mlflow import MlflowClient
 from mlflow.models.model import ModelInfo
 
-from common.fl_models.iris import aggregator
-from common.fl_models.iris import local_learner
-from common.fl_models.iris import utils
-from common.fl_models.iris.aggregator import create_aggregator
-from common.fl_models.iris.local_learner import create_local_learner
+from . import aggregator
+from . import local_learner
+from . import utils
+from .aggregator import create_aggregator
+from .local_learner import create_local_learner
 
 cloudpickle.register_pickle_by_value(aggregator)
 cloudpickle.register_pickle_by_value(local_learner)

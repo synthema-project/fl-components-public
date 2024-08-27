@@ -1,4 +1,4 @@
-from common.fl_models.iris.utils import Utils
+from .utils import Utils
 
 
 def create_aggregator():

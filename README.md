@@ -1,4 +1,6 @@
-# Federated Learning Componentes
+# Federated Learning Components
+
+**OUTDATED**: work in progress
 
 ## Description
 

@@ -2,7 +2,8 @@ from collections import OrderedDict
 
 import torch
 from flwr.common import ParametersRecord
-from common.utils.src.flower_utils.serde import _array_to_ndarray, _ndarray_to_array
+
+from utils.src.flower_utils.serde import _array_to_ndarray, _ndarray_to_array
 
 
 def pytorch_to_parameter_record(pytorch_module: torch.nn.Module):

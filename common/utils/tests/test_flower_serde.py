@@ -2,7 +2,7 @@ from pytest import fixture
 
 import numpy as np
 
-from common.utils.src.flower_utils.serde import _array_to_ndarray, _ndarray_to_array
+from utils.src.flower_utils.serde import _array_to_ndarray, _ndarray_to_array
 
 
 @fixture(scope="session")

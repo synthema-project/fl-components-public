@@ -11,7 +11,7 @@ def create_messages(
     dst_node_id: list[int],
     group_id: str,
     ttl: int = DEFAULT_TTL,
-):
+) -> list[Message]:
     messages = []
     for node_id in dst_node_id:
         message = driver.create_message(
@@ -25,13 +25,13 @@ def create_messages(
     return messages
 
 
-def send_messages(driver: Driver, messages: list[Message]):
+def send_messages(driver: Driver, messages: list[Message]) -> list:
     message_ids = list(driver.push_messages(messages))
     print(f"Pushed {len(message_ids)} messages: {message_ids}")
     return message_ids
 
 
-def wait_messages(driver: Driver, message_ids: list[str]):
+def wait_messages(driver: Driver, message_ids: list[str]) -> list[Message]:
     message_ids = [message_id for message_id in message_ids if message_id != ""]
     all_replies: list[Message] = []
     while True:
