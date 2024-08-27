@@ -29,9 +29,12 @@ def clear_table(session):
 def task_attrs():
     return {
         "user_id": "1",
-        "dataset_uris": ["uri1", "uri2"],
-        "model_uri": "uri",
-        "num_rounds": 10,
+        "use_case": "use_case",
+        "model_name": "model_name",
+        "model_version": 1,
+        "num_global_iterations": 10,
+        "run_name": "run_name",
+        "experiment_name": "experiment_name",
     }
 
 

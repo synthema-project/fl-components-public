@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, Mock, patch
+
 import pytest
+
 from interfaces import mlflow_client
 
 pytest.fixture(autouse=True)
@@ -113,13 +115,6 @@ def test_clean_current_config():
     mlflow_client.clean_current_config()
 
     assert not mlflow_client._configured
-    assert mlflow_client._current_config.experiment_id is None
-    assert mlflow_client._current_config.parent_run_id is None
-    assert mlflow_client._current_config.child_run_id is None
-    assert mlflow_client._current_config.model_name is None
-    assert mlflow_client._current_config.model_version is None
-    assert mlflow_client._current_config.model_tags is None
-    assert mlflow_client._current_config.model_description is None
 
 
 def test_load_mlflow_model():

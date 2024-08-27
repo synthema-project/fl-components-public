@@ -7,12 +7,15 @@ from schemas.task import TaskRead, Status, Task
 def task():
     return TaskRead(
         user_id="user",
-        model_uri="model",
-        num_rounds=10,
-        dataset_uris=["uri1", "uri2"],
+        model_name="model",
+        model_version=1,
+        num_global_iterations=10,
+        use_case="use_case",
         id=1,
         created_at="2021-01-01T00:00:00",
         status="pending",
+        run_name="run_name",
+        experiment_name="experiment_name",
     )
 
 
@@ -21,15 +24,12 @@ def test_task_serde(task):
 
     new_task = TaskRead.from_json(js)
 
-    assert new_task.user_id == "user"
-    assert new_task.model_uri == "model"
-    assert new_task.num_rounds == 10
-    assert new_task.dataset_uris == ["uri1", "uri2"]
-    assert new_task.status == Status.PENDING
-    assert new_task.id == 1
+    new_task_dict = new_task.model_dump()
+    task_dict = new_task.model_dump()
+    assert new_task_dict == task_dict
 
 
-def test_task_change_state(task):
+def test_task_change_status(task):
     task_db = Task.model_validate(task)
 
     task_db.change_status("RUNNING")

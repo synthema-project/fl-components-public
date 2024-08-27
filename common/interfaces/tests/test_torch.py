@@ -1,6 +1,6 @@
 from torch import nn
 
-from common.utils.src.ml_integrations.pytorch import (
+from interfaces.pytorch import (
     pytorch_to_parameter_record,
     parameters_to_pytorch_state_dict,
 )

@@ -23,7 +23,7 @@ run_tests() {
         echo "Error: ruff check failed."
         exit 1
     else
-        echo "ruff check passed."
+        echo "Success"
         echo "==================================================================="
     fi
 
@@ -33,7 +33,7 @@ run_tests() {
         echo "Error: ruff format failed."
         exit 1
     else
-        echo "ruff format passed."
+        echo "Success"
         echo "==================================================================="
     fi
 
@@ -51,7 +51,7 @@ run_tests() {
             exit 1
         fi
         cd - > /dev/null || exit
-        echo "Tests and checks passed for $project."
+        echo "Success"
         echo "==================================================================="
     done
 }

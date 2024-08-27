@@ -9,7 +9,7 @@ from fl_client.stages import load_data, load_model, prepare_data, upload_model
 from fl_client.config import DATA_PATH
 
 from fl_models.iris.fl_model import FLModel
-from utils.src.ml_integrations.pytorch import (
+from interfaces.pytorch import (
     pytorch_to_parameter_record,
 )
 

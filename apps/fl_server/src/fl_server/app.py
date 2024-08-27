@@ -1,7 +1,6 @@
 from flwr.common import Context, ParametersRecord
 from flwr.server import Driver, ServerApp
 
-from fl_server.models.task import Task
 from fl_server.requires import (
     require_clean_config,
     require_filter_clients,
@@ -16,9 +15,10 @@ from fl_server.requires import (
 )
 from fl_server.stages import aggregate_metrics, aggregate_parameters, load_model
 from fl_server.config import global_vars
-from fl_server.utils import create_mlflow_runs
+from fl_server.utils.mlflow_utils import create_mlflow_runs
 
 from interfaces import mlflow_client
+from schemas.task import Task
 
 
 def _mlflow_config(task: Task, driver: Driver, node_ids: list[int]) -> None:

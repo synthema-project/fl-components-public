@@ -1,7 +1,10 @@
+from pika import spec
+from pika.channel import Channel
+
 from fl_server import config
 from fl_server.app import get_serverapp
+from fl_server.utils.app_utils import run_server_app
 
-from utils.src.flower_utils.server_app import run_server_app
 from interfaces import rabbitmq_client, mlflow_client
 from schemas.task import Task
 
@@ -16,7 +19,12 @@ def configure() -> None:
     )
 
 
-def event_handler(channel, method_frame, header_frame, body):
+def event_handler(
+    channel: Channel,
+    method_frame: spec.Basic.Deliver,
+    header_frame: spec.Basic.Deliver,
+    body: bytes,
+) -> None:
     task = Task.model_validate_json(body)
     app = get_serverapp(task)
     run_server_app(app)

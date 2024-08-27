@@ -28,7 +28,7 @@ def aggregate_parameters(
 def aggregate_metrics(
     metrics_list: list[MetricsRecord],
     global_vars: dict[str, Any],
-) -> dict[str, Any]:
+) -> MetricsRecord:
     aggregator = global_vars["aggregator"]
     agg_metrics = aggregator.aggregate_metrics(metrics_list)
     if not isinstance(agg_metrics, MetricsRecord):

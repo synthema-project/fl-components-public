@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 from flwr.common import DEFAULT_TTL, Message, RecordSet, Metadata
 from flwr.server.driver import GrpcDriver as Driver
 
-from utils.src.flower_utils.driver import (
+from fl_server.utils.driver_utils import (
     create_messages,
     send_messages,
     wait_messages,

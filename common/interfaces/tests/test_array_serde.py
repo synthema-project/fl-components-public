@@ -2,7 +2,7 @@ from pytest import fixture
 
 import numpy as np
 
-from utils.src.flower_utils.serde import _array_to_ndarray, _ndarray_to_array
+from interfaces.array_serde import array_to_ndarray, ndarray_to_array
 
 
 @fixture(scope="session")
@@ -11,6 +11,6 @@ def ndarray():
 
 
 def test_serde(ndarray):
-    array = _ndarray_to_array(ndarray)
-    deserialized = _array_to_ndarray(array)
+    array = ndarray_to_array(ndarray)
+    deserialized = array_to_ndarray(array)
     assert np.array_equal(ndarray, deserialized)
