@@ -25,10 +25,10 @@ generate_envs() {
     done
 }
 
-# Get the directory of the script
-script_dir="$(dirname $0)"
+# Obtener el directorio donde se encuentra el script actual
+script_dir="$(dirname "$(realpath "$0")")"
 
-# CD into the parent directory
-cd "../$script_dir" || exit
+# Cambiar al directorio padre
+cd "$(dirname "$script_dir")" || exit
 
 generate_envs

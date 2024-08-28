@@ -58,10 +58,10 @@ run_tests() {
 
 
 # Obtener el directorio donde se encuentra el script actual
-script_dir="$(dirname $0)"
+script_dir="$(dirname "$(realpath "$0")")"
 
 # Cambiar al directorio padre
-cd "../$script_dir" || exit
+cd "$(dirname "$script_dir")" || exit
 
 # Check if .env file exists
 if [ -f .env ]; then
