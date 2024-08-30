@@ -36,13 +36,10 @@ addopts = [
     "--import-mode=importlib",
 ]
 
-[tool.pytest_env]
-MLFLOW_URL = { value = "http://localhost:30246", skip_if_set = true }
-NODE_NAME = { value = "test", skip_if_set = true }
-DATA_PATH = { value = "common/data/iris.csv", skip_if_set = true }
-
-[tool.pytest_coverage.run]
-omit = ["tests/*"]
+# [tool.pytest_env]
+# MLFLOW_URL = { value = "http://localhost:30246", skip_if_set = true }
+# NODE_NAME = { value = "test", skip_if_set = true }
+# DATA_PATH = { value = "common/data/iris.csv", skip_if_set = true }
 
 [tool.ruff]
 target-version = "py311"

@@ -56,7 +56,7 @@ def create_parameters_response(
     configsrecord = ConfigsRecord(
         {
             "success": True,
-            "message": "parameters retrieved",
+            "message": "retrieved parameters",
         }
     )
     rs = RecordSet(

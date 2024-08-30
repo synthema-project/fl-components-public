@@ -1,133 +1,138 @@
-import random
+from typing import Callable
 
-from flwr.common import DEFAULT_TTL, MessageType, MetricsRecord, ParametersRecord
+from flwr.common import (
+    DEFAULT_TTL,
+    MessageType,
+    MetricsRecord,
+    ParametersRecord,
+    Message,
+)
 from flwr.server import Driver
 
-from fl_server.stages import check_success_clients, filter_clients
-from fl_server.utils import driver_utils
-from fl_server.utils import requires_utils
+from fl_server import stages
+from fl_server.utils import driver_utils, requires_utils
+
+import interfaces.recordset
 
 
-def require_filter_clients(
-    driver: Driver, node_ids: list[int], use_case: str
-) -> list[int]:
-    # Create message content
-    recordset = requires_utils.create_filter_clients_recordset(use_case)
-    # Create messages
+def execution_flow(
+    driver: Driver,
+    node_ids: list[int],
+    recordset_factory: Callable,
+    msg_type: str,
+    msg_group: str,
+    recordset_factory_args: tuple = (),
+    check_success: bool = False,
+) -> list[Message]:
+    recordset = recordset_factory(*recordset_factory_args)
     messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, node_ids, "filter_message", DEFAULT_TTL
+        driver, recordset, msg_type, node_ids, msg_group, DEFAULT_TTL
     )
-    # Send messages
     message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
     all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Filter clients
-    filtered_node_ids = filter_clients(all_replies)
+    if check_success:
+        requires_utils.check_success_clients(all_replies)
+    return all_replies
+
+
+def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[int]:
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_filter_clients_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="filter_message",
+        recordset_factory_args=(use_case,),
+    )
+    filtered_node_ids = stages.filter_clients(all_replies)
     return filtered_node_ids
 
 
-def require_load_data(driver: Driver, node_ids: list[int], use_case: str) -> None:
-    # Create message content
-    recordset = requires_utils.create_load_data_recordset(use_case)
-    # Create messages
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, node_ids, "load_data", DEFAULT_TTL
+def load_data(driver: Driver, node_ids: list[int], use_case: str) -> None:
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_load_data_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="load_data",
+        recordset_factory_args=(use_case,),
+        check_success=True,
     )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)
 
 
-def require_prepare_data(driver: Driver, node_ids: list[int]) -> None:
-    # Create message content
-    recordset = requires_utils.create_prepare_data_recordset()
-    # Create messages
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, node_ids, "prepare_data", DEFAULT_TTL
+def prepare_data(driver: Driver, node_ids: list[int]) -> None:
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_prepare_data_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="prepare_data",
+        check_success=True,
     )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)
 
 
-def require_load_model(
+def load_model(
     driver: Driver, node_ids: list[int], model_name: str, model_version: int
 ) -> None:
-    recordset = requires_utils.create_load_model_recordset(model_name, model_version)
-    # Create messages
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, node_ids, "load_model", DEFAULT_TTL
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_load_model_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="load_model",
+        check_success=True,
     )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)
 
 
-def require_upload_model(
+def upload_model(
     driver: Driver, node_ids: list[int], parametersrecord: ParametersRecord
 ) -> None:
-    recordset = requires_utils.create_upload_model_recordset(parametersrecord)
-    # Pick random client
-    node_id = random.choice(node_ids)
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, [node_id], "upload_model", DEFAULT_TTL
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_upload_model_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="upload_model",
+        recordset_factory_args=(parametersrecord,),
+        check_success=True,
     )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)
 
 
-def require_get_parameters_from_one_node(
+def get_parameters_from_one_node(
     driver: Driver, node_ids: list[int]
 ) -> ParametersRecord:
-    recordset = requires_utils.create_get_parameters_recordset()
-    # Pick random client
-    node_id = random.choice(node_ids)
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, [node_id], "get_parameters", DEFAULT_TTL
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_get_parameters_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="get_parameters",
+        check_success=True,
     )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
     msg = all_replies[0]
     # Check success
-    check_success_clients(all_replies)
+    requires_utils.check_success_clients(all_replies)
     param_record = msg.content.parameters_records["parameters"]
     if not isinstance(param_record, ParametersRecord):
         raise TypeError(f"Expected ParametersRecord, got {type(param_record)}")
     return param_record
 
 
-def require_set_parameters(
+def set_parameters(
     driver: Driver, node_ids: list[int], parametersrecord: ParametersRecord
 ) -> None:
-    recordset = requires_utils.create_set_parameters_recordset(parametersrecord)
-    # Create messages
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, node_ids, "set_parameters", DEFAULT_TTL
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_set_parameters_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="set_parameters",
+        recordset_factory_args=(parametersrecord,),
+        check_success=True,
     )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)
 
 
-def require_set_run_config(
+def set_run_config(
     driver: Driver,
     node_ids: list[int],
     experiment_id: str,
@@ -135,40 +140,33 @@ def require_set_run_config(
     model_name: str,
     model_version: int,
 ) -> None:
-    recordset = requires_utils.create_set_run_recordset(
-        experiment_id, run_id, model_name, model_version
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_set_run_cfg_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="set_run_config",
+        recordset_factory_args=(experiment_id, run_id, model_name, model_version),
+        check_success=True,
     )
-    # Create messages
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, node_ids, "set_run_config", DEFAULT_TTL
-    )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)
 
 
-def require_train_model(
+def train_model(
     driver: Driver,
     node_ids: list[int],
     parametersrecord: ParametersRecord,
     current_global_iter: int,
 ) -> list[tuple[ParametersRecord, MetricsRecord]]:
-    recordset = requires_utils.create_train_model_recordset(
-        parametersrecord, current_global_iter
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_train_model_recordset,
+        msg_type=MessageType.TRAIN,
+        msg_group="train_model",
+        recordset_factory_args=(parametersrecord, current_global_iter),
+        check_success=True,
     )
-    # Create messages
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.TRAIN, node_ids, "train_model", DEFAULT_TTL
-    )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)
+
     return [
         (
             msg.content.parameters_records["parameters"],
@@ -178,18 +176,15 @@ def require_train_model(
     ]
 
 
-def require_clean_config(
+def clean_config(
     driver: Driver,
     node_ids: list[int],
 ) -> None:
-    recordset = requires_utils.create_clean_config_recordset()
-    # Create messages
-    messages = driver_utils.create_messages(
-        driver, recordset, MessageType.QUERY, node_ids, "clean_config", DEFAULT_TTL
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_clean_config_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="clean_config",
+        check_success=True,
     )
-    # Send messages
-    message_ids = driver_utils.send_messages(driver, messages)
-    # Wait for results
-    all_replies = driver_utils.wait_messages(driver, message_ids)
-    # Check success
-    check_success_clients(all_replies)

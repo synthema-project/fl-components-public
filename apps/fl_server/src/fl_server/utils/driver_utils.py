@@ -25,7 +25,7 @@ def create_messages(
     return messages
 
 
-def send_messages(driver: Driver, messages: list[Message]) -> list:
+def send_messages(driver: Driver, messages: list[Message]) -> list[str]:
     message_ids = list(driver.push_messages(messages))
     print(f"Pushed {len(message_ids)} messages: {message_ids}")
     return message_ids

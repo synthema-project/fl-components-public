@@ -30,7 +30,7 @@ def event_handler(
     run_server_app(app)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     configure()
     while True:
         rabbitmq_client.listen(event_handler)
