@@ -1,0 +1,125 @@
+services:
+  postgres:
+    image: bitnami/postgresql
+    container_name: postgres
+    environment:
+      POSTGRESQL_USER: username
+      POSTGRESQL_PASSWORD: password
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
+  rabbitmq:
+    image: rabbitmq:3.13.3-management
+    container_name: rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=username
+      - RABBITMQ_DEFAULT_PASS=password
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow
+    container_name: mlflow
+    ports:
+      - 10000:80
+    command: ["mlflow", "server", "--host", "0.0.0.0", "--port", "80", 
+            "--serve-artifacts", "--artifacts-destination", "file:///artifacts",
+            "--backend-store-uri", "sqlite:///store.db"]
+  
+  flower-superlink:
+    image: flwr/superlink:1.9.0
+    container_name: flower-superlink
+    command: ["--insecure"]
+
+  synthema-fl-client:
+    image: synthema-fl-client:v0.0.0
+    container_name: synthema-fl-client
+    command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
+    depends_on:
+      flower-superlink:
+        condition: service_started
+    environment:
+      - MLFLOW_URL=http://mlflow
+      - NODE_NAME=test
+      - DATA_PATH=/common/fl_models/iris/data.csv
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+  
+  synthema-fl-server:
+    image: synthema-fl-server:v0.0.0
+    container_name: synthema-fl-server
+    command: ["python", "-m", "src.fl_server.main", "--superlink", "flower-superlink:9091"]
+    depends_on:
+      flower-superlink:
+        condition: service_started
+      synthema-fl-client:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBIT_USERNAME=username
+      - RABBIT_PASSWORD=password
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_PORT=5672
+      - MLFLOW_URL=http://mlflow
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
+  synthema-fl-restapi:
+    image: synthema-fl-restapi:v0.0.0
+    container_name: synthema-fl-restapi
+    command: ["python", "-m", "src.restapi.main"]
+    environment:
+      - RABBIT_USERNAME=username
+      - RABBIT_PASSWORD=password
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_PORT=5672
+      - POSTGRES_USERNAME=username
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_ECHO=true
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 1m
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
+  synthema-fl-test:
+    image: synthema-fl-test:v0.0.0
+    build:
+      context: ../..
+      dockerfile: e2e/docker_full/Dockerfile
+    container_name: synthema-fl-test
+    command: ["python", "test.py"]
+    depends_on:
+      mlflow:
+        condition: service_started
+      synthema-fl-restapi:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"

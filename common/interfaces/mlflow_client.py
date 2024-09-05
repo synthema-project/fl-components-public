@@ -21,6 +21,7 @@ class __Config:
     model_tags: dict = dict()
     model_python: Any = None
     model_description: Optional[str] = None
+    is_central_node: Optional[bool] = None
 
     def __new__(cls) -> Self:
         raise RuntimeError("Cannot instantiate Config class")
@@ -38,8 +39,9 @@ _current_config = __Config
 _mlflow_client = cast(MlflowClient, None)
 
 
-def setup_mlflow(tracking_url: str) -> None:
-    global _mlflow_client, _initialized
+def setup_mlflow(tracking_url: str, is_central_node: bool = False) -> None:
+    global _mlflow_client, _initialized, _current_config
+    _current_config.is_central_node = is_central_node
     mlflow.set_tracking_uri(tracking_url)
     _mlflow_client = MlflowClient(tracking_url)
     _initialized.value = True
@@ -91,6 +93,9 @@ def set_current_config(
 def clean_current_config() -> None:
     global _current_config, _configured
     # _current_config.clean()
+    if _current_config.is_central_node:
+        _mlflow_client.update_run(_current_config.parent_run_id, "FINISHED")
+    _mlflow_client.update_run(_current_config.child_run_id, "FINISHED")
     _configured.value = False
 
 

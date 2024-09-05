@@ -71,7 +71,9 @@ def test_configure(monkeypatch_env):
     ):
         configure()
 
-        mock_setup_mlflow.assert_called_once_with(monkeypatch_env["MLFLOW_URL"])
+        mock_setup_mlflow.assert_called_once_with(
+            monkeypatch_env["MLFLOW_URL"], is_central_node=True
+        )
 
         mock_rabbitmq_configure.assert_called_once_with(
             user=monkeypatch_env["RABBIT_USERNAME"],
@@ -94,4 +96,4 @@ def test_event_handler(task):
 
         mock_model_validate_json.assert_called_once_with(task.model_dump_json())
         mock_get_serverapp.assert_called_once_with(task)
-        mock_run_server_app.assert_called_once_with(mock_get_serverapp.return_value)
+        mock_run_server_app.assert_called_once_with(mock_get_serverapp.return_value, "")

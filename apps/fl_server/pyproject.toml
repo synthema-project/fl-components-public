@@ -1,6 +1,6 @@
 # Poetry
 [tool.poetry]
-name = "fl-server"
+name = "synthema-fl-server"
 description = "Application containing the component fl-server"
 authors = [
     "Borja Arroyo Galende <borja.arroyog@upm.es>"
@@ -29,6 +29,7 @@ pytest-env = "^1.1"
 pytest-cov = "^5.0"
 ruff = "^0.5"
 mypy = "^1.10"
+pip-licenses = "^5.0.0"
 
 [tool.mypy]
 python_version = "3.11"

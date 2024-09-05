@@ -45,10 +45,21 @@ def create_app() -> FastAPI:
     return app
 
 
-def startup_app(app: FastAPI) -> None:
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+def startup_app(app: FastAPI, host: str, port: int) -> None:
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Start the FastAPI app")
+    parser.add_argument(
+        "--host", type=str, default="0.0.0.0", help="Host to run the FastAPI app"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000, help="Port to run the FastAPI app"
+    )
+    args = parser.parse_args()
+
     app = create_app()
-    startup_app(app)
+    startup_app(app, args.host, args.port)

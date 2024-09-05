@@ -1,6 +1,6 @@
 # Poetry
 [tool.poetry]
-name = "fl-client"
+name = "synthema-fl-client"
 description = "Application containing the component fl-client"
 authors = [
     "Borja Arroyo Galende <borja.arroyog@upm.es>"
@@ -26,6 +26,7 @@ pytest = "^8.2"
 pytest-env = "^1.1"
 pytest-cov = "^5.0"
 mypy = "^1.10"
+pip-licenses = "^5.0.0"
 
 [tool.poetry-dynamic-versioning]
 enable = true

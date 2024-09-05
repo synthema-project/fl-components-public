@@ -1,4 +1,4 @@
-ARG CURRENT_VERSION=latest
+ARG CURRENT_VERSION
 
 FROM python:3.11-buster as builder
 
@@ -18,8 +18,6 @@ RUN poetry install --no-dev --no-root && rm -rf $POETRY_CACHE_DIR
 
 FROM synthema-fl-common:${CURRENT_VERSION} as runtime
 
-RUN apt-get update && apt-get install -y curl
-
 WORKDIR /app
 
 ENV VIRTUAL_ENV=/app/.venv \
@@ -29,4 +27,4 @@ ENV VIRTUAL_ENV=/app/.venv \
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY src/ ./src
 
-CMD ["python", "-m", "src.restapi.main"]
+CMD ["flower-client-app", "--insecure", "src.fl_client.main:app"]

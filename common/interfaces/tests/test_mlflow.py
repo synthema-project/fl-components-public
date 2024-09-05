@@ -111,10 +111,20 @@ def test_set_current_config():
 def test_clean_current_config():
     mlflow_client._initialized.value = True
     mlflow_client._configured.value = True
+    mlflow_client._current_config.is_central_node = True
+    mlflow_client._current_config.parent_run_id = "test_parent_run_id"
+    mlflow_client._current_config.child_run_id = "test_child_run_id"
 
-    mlflow_client.clean_current_config()
+    with patch.object(mlflow_client._mlflow_client, "update_run") as mock_update_run:
+        mlflow_client.clean_current_config()
 
     assert not mlflow_client._configured
+    mock_update_run.assert_any_call(
+        mlflow_client._current_config.child_run_id, "FINISHED"
+    )
+    mock_update_run.assert_any_call(
+        mlflow_client._current_config.parent_run_id, "FINISHED"
+    )
 
 
 def test_load_mlflow_model():

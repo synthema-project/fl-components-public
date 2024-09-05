@@ -21,10 +21,7 @@ class FLModel(PythonModel):
         self.create_local_learner = create_local_learner
 
 
-if __name__ == "__main__":
-    # with open("model.pkl", "wb") as f:
-    #     cloudpickle.dump(FLModel(), f)
-
+def log_model() -> ModelInfo:
     import mlflow
     from mlflow.pyfunc import log_model
 
@@ -40,3 +37,11 @@ if __name__ == "__main__":
     mlflow_client.set_model_version_tag(
         "iris_model", model_info.registered_model_version, "use_case", "iris"
     )
+    return model_info
+
+
+if __name__ == "__main__":
+    # with open("model.pkl", "wb") as f:
+    #     cloudpickle.dump(FLModel(), f)
+
+    log_model()

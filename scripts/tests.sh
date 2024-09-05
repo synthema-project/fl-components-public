@@ -6,8 +6,7 @@ if ! command -v poetry &> /dev/null; then
     exit 1
 fi
 
-
-# Lista de directorios de aplicaciones y librerías
+# List of application and library directories
 projects=(
     "apps/fl_client"
     "apps/fl_server"
@@ -15,52 +14,43 @@ projects=(
     "common"
 )
 
-# Función para ejecutar pruebas y herramientas de calidad
+# Function to run Poetry commands and handle errors
+run_poetry_command() {
+    local command=$1
+    local message=$2
+    local project=$3
+
+    echo "Running ${message} for ${project:-"root project"}..."
+    poetry run $command > /dev/null
+    if [ $? -ne 0 ]; then
+        echo "Error: ${message} failed ${project:+for $project}."
+        exit 1
+    fi
+    echo "Success: ${message} completed."
+}
+
+# Function to run tests and quality tools
 run_tests() {
-    echo "Running ruff check..."
-    poetry run ruff check > /dev/null
-    if [ $? -ne 0 ]; then
-        echo "Error: ruff check failed."
-        exit 1
-    else
-        echo "Success"
-        echo "==================================================================="
-    fi
+    # Run global checks
+    run_poetry_command "ruff check" "ruff check"
+    run_poetry_command "ruff format" "ruff format"
+    echo "==================================================================="
 
-    echo "Running ruff format..."
-    poetry run ruff format > /dev/null
-    if [ $? -ne 0 ]; then
-        echo "Error: ruff format failed."
-        exit 1
-    else
-        echo "Success"
-        echo "==================================================================="
-    fi
-
+    # Run tests and checks for each project
     for project in "${projects[@]}"; do
         echo "Running tests and checks for $project..."
         cd "$project" || exit
-        poetry run pytest > /dev/null
-        if [ $? -ne 0 ]; then
-            echo "Error: pytest failed for $project."
-            exit 1
-        fi
-        poetry run python -m mypy . --explicit-package-bases > /dev/null
-        if [ $? -ne 0 ]; then
-            echo "Error: mypy failed for $project."
-            exit 1
-        fi
+        run_poetry_command "pytest" "pytest" "$project"
+        run_poetry_command "python -m mypy . --explicit-package-bases" "mypy" "$project"
         cd - > /dev/null || exit
-        echo "Success"
         echo "==================================================================="
     done
 }
 
-
-# Obtener el directorio donde se encuentra el script actual
+# Get the directory where the current script is located
 script_dir="$(dirname "$(realpath "$0")")"
 
-# Cambiar al directorio padre
+# Change to the parent directory
 cd "$(dirname "$script_dir")" || exit
 
 # Check if .env file exists
@@ -73,3 +63,11 @@ else
 fi
 
 run_tests
+
+echo "Running e2e tests..."
+bash e2e/docker_full/run.sh > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "e2e test failed"
+    exit 1
+fi
+echo "Success"
