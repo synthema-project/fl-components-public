@@ -404,24 +404,25 @@ typing = ["typing-extensions (>=4.8)"]
 
 [[package]]
 name = "flwr"
-version = "1.9.0"
+version = "1.11.0"
 description = "Flower: A Friendly Federated Learning Framework"
 optional = false
 python-versions = "<4.0,>=3.8"
 files = [
-    {file = "flwr-1.9.0-py3-none-any.whl", hash = "sha256:a3f1b5a9bc56f7e53c3714919a2988bf73d0607c5eac1596b038123189a8e89a"},
-    {file = "flwr-1.9.0.tar.gz", hash = "sha256:99e869d29bcebe2fa585920cff4f059fb22585be59e3ffc2f017da4df82879a9"},
+    {file = "flwr-1.11.0-py3-none-any.whl", hash = "sha256:cd596cf212733aa407a29640eb74f5812f77c3e6acf7ceec720aaf20ee15be48"},
+    {file = "flwr-1.11.0.tar.gz", hash = "sha256:ad99d2513868c506104c4e083cf829ecbee6e5c7f5c0926569a8f1770545ede5"},
 ]
 
 [package.dependencies]
 cryptography = ">=42.0.4,<43.0.0"
-grpcio = ">=1.60.0,<2.0.0"
+grpcio = ">=1.60.0,<1.64.2 || >1.64.2,<1.65.1 || >1.65.1,<1.65.2 || >1.65.2,<1.65.4 || >1.65.4,<2.0.0"
 iterators = ">=0.0.2,<0.0.3"
 numpy = ">=1.21.0,<2.0.0"
 pathspec = ">=0.12.1,<0.13.0"
 protobuf = ">=4.25.2,<5.0.0"
 pycryptodome = ">=3.18.0,<4.0.0"
 tomli = ">=2.0.1,<3.0.0"
+tomli-w = ">=1.0.0,<2.0.0"
 typer = {version = ">=0.9.0,<0.10.0", extras = ["all"]}
 
 [package.extras]
@@ -1660,6 +1661,17 @@ files = [
 ]
 
 [[package]]
+name = "tomli-w"
+version = "1.0.0"
+description = "A lil' TOML writer"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "tomli_w-1.0.0-py3-none-any.whl", hash = "sha256:9f2a07e8be30a0729e533ec968016807069991ae2fd921a78d42f429ae5f4463"},
+    {file = "tomli_w-1.0.0.tar.gz", hash = "sha256:f463434305e0336248cac9c2dc8076b707d8a12d019dd349f5c1e382dd1ae1b9"},
+]
+
+[[package]]
 name = "torch"
 version = "2.4.0"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
@@ -1910,4 +1922,4 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11.0"
-content-hash = "480d2a718e675a55e3c75a2edd231264b1b1eba20f0e587e3778b30e71d44800"
+content-hash = "ed5625611ea41b0319d973dfaed1fa5ac775272265f712b11bb1f519e3579b3d"

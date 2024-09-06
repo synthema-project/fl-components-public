@@ -188,13 +188,13 @@ def test_upload_final_state():
     )
 
     mock_mlflow_client.update_model_version.assert_called_once_with(
-        uploaded_model_name, model_version, description
+        uploaded_model_name, str(model_version), description
     )
     mock_mlflow_client.set_model_version_tag.assert_any_call(
-        uploaded_model_name, model_version, "use_case", tags["use_case"]
+        uploaded_model_name, str(model_version), "use_case", tags["use_case"]
     )
     mock_mlflow_client.set_model_version_tag.assert_any_call(
-        uploaded_model_name, model_version, "trained", True
+        uploaded_model_name, str(model_version), "trained", True
     )
 
     assert result == {

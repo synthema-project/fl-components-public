@@ -20,7 +20,7 @@ def create_success_response(msg: Message, event: str) -> Message:
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
 
 
-def create_upload_model_response(msg: Message, model_id: str, run_id: int) -> Message:
+def create_upload_model_response(msg: Message, model_id: str, run_id: str) -> Message:
     configsrecord = ConfigsRecord(
         {
             "success": True,

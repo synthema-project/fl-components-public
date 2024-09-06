@@ -1,4 +1,5 @@
 from typing import Any
+
 from flwr.common import Message, ParametersRecord, MetricsRecord
 
 from interfaces import mlflow_client

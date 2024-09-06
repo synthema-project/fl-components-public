@@ -1,4 +1,4 @@
-from typing import Any, Optional, Self, cast
+from typing import Any, Self, TypedDict, cast
 
 import mlflow
 from mlflow import MlflowClient
@@ -12,16 +12,24 @@ from mlflow.data.http_dataset_source import HTTPDatasetSource
 from .utils import ensure_bool, MutableBoolean
 
 
+class ModelView(TypedDict):
+    name: str
+    version: int
+    model_id: str
+    run_id: str
+    uri: str
+
+
 class __Config:
-    experiment_id: Optional[str] = None
-    parent_run_id: Optional[str] = None
-    child_run_id: Optional[str] = None
-    model_name: Optional[str] = None
-    model_version: Optional[int] = None
+    experiment_id: str = cast(str, None)
+    parent_run_id: str = cast(str, None)
+    child_run_id: str = cast(str, None)
+    model_name: str = cast(str, None)
+    model_version: int = cast(int, None)
     model_tags: dict = dict()
     model_python: Any = None
-    model_description: Optional[str] = None
-    is_central_node: Optional[bool] = None
+    model_description: str = cast(str, None)
+    is_central_node: bool = cast(bool, None)
 
     def __new__(cls) -> Self:
         raise RuntimeError("Cannot instantiate Config class")
@@ -49,7 +57,10 @@ def setup_mlflow(tracking_url: str, is_central_node: bool = False) -> None:
 
 @ensure_bool(_initialized)
 def create_parent_run(run_name: str, experiment_name: str) -> tuple[str, str]:
-    experiment_id = _mlflow_client.get_experiment_by_name(experiment_name).experiment_id
+    experiment = _mlflow_client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        raise ValueError(f"Experiment {experiment_name} not found")
+    experiment_id = experiment.experiment_id
     run = _mlflow_client.create_run(experiment_id=experiment_id, run_name=run_name)
     return run.info.run_id, run.info.experiment_id
 
@@ -70,14 +81,14 @@ def create_child_run(experiment_id: str, parent_run_id: str, node_name: str) -> 
 @ensure_bool(_initialized)
 def set_current_config(
     experiment_id: str,
-    parent_run_id: str | None,
+    parent_run_id: str,
     child_run_id: str,
     model_name: str,
     model_version: int,
 ) -> None:
     global _current_config, _mlflow_client
     model_mlflow_meta = _mlflow_client.get_model_version(
-        name=model_name, version=model_version
+        name=model_name, version=str(model_version)
     )
     _current_config.experiment_id = experiment_id
     _current_config.parent_run_id = parent_run_id
@@ -85,7 +96,7 @@ def set_current_config(
     _current_config.model_name = model_name
     _current_config.model_version = model_version
     _current_config.model_tags = model_mlflow_meta.tags
-    _current_config.model_description = model_mlflow_meta.description
+    _current_config.model_description = cast(str, model_mlflow_meta.description)
     _configured.value = True
 
 
@@ -111,7 +122,7 @@ def load_model() -> PyFuncModel:
 @ensure_bool(_initialized)
 def upload_final_state(
     local_learner: Any,
-) -> dict:
+) -> ModelView:
     name = f"trained_{_current_config.model_name}"
     with mlflow.start_run(
         run_id=_current_config.parent_run_id,
@@ -123,31 +134,34 @@ def upload_final_state(
         )
 
     version = model_info.registered_model_version
+    if not isinstance(version, int):
+        raise TypeError(f"Expected int, got {type(version)}")
+
     _mlflow_client.update_model_version(
-        name, version, _current_config.model_description
+        name, str(version), _current_config.model_description
     )
     _mlflow_client.set_model_version_tag(
         name,
-        model_info.registered_model_version,
+        str(version),
         "use_case",
         _current_config.model_tags["use_case"],
     )
-    _mlflow_client.set_model_version_tag(
-        name, model_info.registered_model_version, "trained", True
+    _mlflow_client.set_model_version_tag(name, str(version), "trained", True)
+    return ModelView(
+        {
+            "name": name,
+            "version": version,
+            "model_id": model_info.model_uuid,
+            "run_id": model_info.run_id,
+            "uri": model_info.model_uri,
+        }
     )
-    return {
-        "name": name,
-        "version": version,
-        "model_id": model_info.model_uuid,
-        "run_id": model_info.run_id,
-        "uri": model_info.model_uri,
-    }
 
 
 @ensure_bool(_configured)
 @ensure_bool(_initialized)
 def log_metrics(
-    metrics: dict,
+    metrics: dict[str, float],
     step: int,
 ) -> None:
     with mlflow.start_run(run_id=_current_config.child_run_id):
