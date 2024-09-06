@@ -32,7 +32,7 @@ run_poetry_command() {
 # Function to run tests and quality tools
 run_tests() {
     # Run global checks
-    run_poetry_command "ruff check" "ruff check"
+    run_poetry_command "ruff check --fix" "ruff check"
     run_poetry_command "ruff format" "ruff format"
     echo "==================================================================="
 
