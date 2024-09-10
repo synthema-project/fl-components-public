@@ -41,7 +41,7 @@ services:
     command: ["--insecure"]
 
   synthema-fl-client:
-    image: synthema-fl-client:v0.0.0
+    image: synthema-fl-client:test
     container_name: synthema-fl-client
     command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
     depends_on:
@@ -57,7 +57,7 @@ services:
           cpus: "1"
   
   synthema-fl-server:
-    image: synthema-fl-server:v0.0.0
+    image: synthema-fl-server:test
     container_name: synthema-fl-server
     command: ["python", "-m", "src.fl_server.main", "--superlink", "flower-superlink:9091"]
     depends_on:
@@ -79,7 +79,7 @@ services:
           cpus: "1"
 
   synthema-fl-restapi:
-    image: synthema-fl-restapi:v0.0.0
+    image: synthema-fl-restapi:test
     container_name: synthema-fl-restapi
     command: ["python", "-m", "src.restapi.main"]
     environment:
@@ -92,7 +92,8 @@ services:
       - POSTGRES_DB=postgres
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_ECHO=true
+      - DB_ECHO=true
+      - DB_MODE=postgresql
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -108,7 +109,7 @@ services:
           cpus: "1"
 
   synthema-fl-test:
-    image: synthema-fl-test:v0.0.0
+    image: synthema-fl-test:test
     build:
       context: ../..
       dockerfile: e2e/docker_full/Dockerfile
