@@ -1,4 +1,3 @@
-from typing import cast
 from flwr.common import Context, ParametersRecord
 from flwr.server import Driver, ServerApp
 
@@ -52,7 +51,7 @@ def _training_loop(
         aggregated_metrics = stages.aggregate_metrics(
             [r[1] for r in results], config.global_vars
         )
-        mlflow_client.log_metrics(cast(dict[str, float], aggregated_metrics), step=iter)
+        mlflow_client.log_metrics(aggregated_metrics, step=iter)
         requires.set_parameters(driver, node_ids, aggregated_parameters)
 
 

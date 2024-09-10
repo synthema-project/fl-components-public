@@ -1,6 +1,6 @@
-from typing import cast
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
+from mlflow.models.model import ModelInfo
 
 from fl_client.config import DATA_PATH
 
@@ -55,7 +55,7 @@ def train_model(
     metrics = local_learner.train()
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Unexpected metrics type: {type(metrics)}")
-    mlflow_client.log_metrics(cast(dict[str, float], metrics), current_global_iter)
+    mlflow_client.log_metrics(metrics, current_global_iter)
     return metrics
 
 
@@ -85,11 +85,11 @@ def set_model_parameters(parameters: ParametersRecord, global_vars: dict) -> Non
 def upload_model(
     latest_parameters: ParametersRecord,
     global_vars: dict,
-) -> mlflow_client.ModelView:
+) -> ModelInfo:
     local_learner = global_vars["local_learner"]
     set_model_parameters(latest_parameters, global_vars)
-    model_view = mlflow_client.upload_final_state(local_learner)
-    return cast(mlflow_client.ModelView, model_view)
+    model_info = mlflow_client.upload_final_state(local_learner)
+    return model_info
 
 
 def clean_current_config() -> None:

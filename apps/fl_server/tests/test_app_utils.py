@@ -20,9 +20,7 @@ def test_run_server_app():
         level=app_utils.INFO, timestamps=True, colored=True
     )
     mock_driver.assert_called_once_with(
-        run_id=0,
-        driver_service_address=superlink_url,
-        root_certificates=root_certificates,
+        driver_service_address=superlink_url, root_certificates=root_certificates
     )
     server_app.assert_called_once()
     mock_driver.return_value.close.assert_called_once()
