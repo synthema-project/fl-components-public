@@ -13,4 +13,5 @@ def ndarray_to_array(ndarray: NDArray) -> Array:
 
 
 def array_to_ndarray(array: Array) -> NDArray:
+    """Represent Array as NumPy ndarray."""
     return np.frombuffer(buffer=array.data, dtype=array.dtype).reshape(array.shape)
