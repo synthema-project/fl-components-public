@@ -1,12 +1,14 @@
 from typing import Sequence
+
 from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 from sqlmodel import Session, select, delete
 
 from restapi.db import engine
+from restapi import config
 
+from interfaces.rabbitmq_client import RabbitMQClient
 from schemas.task import TaskCreate, TaskRead, Task
-from interfaces import rabbitmq_client
 
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=None)
 
@@ -41,9 +43,8 @@ async def create_task(task: TaskCreate) -> Task:
         session.add(db_task)
         session.commit()
         session.refresh(db_task)
-        rabbitmq_client.publish_message(
-            TaskRead.model_validate(db_task).model_dump_json()
-        )
+        rabbitmq: RabbitMQClient = config.obj["rabbitmq_dispatch"]
+        rabbitmq.publish_message(TaskRead.model_validate(db_task).model_dump_json())
         return db_task
 
 

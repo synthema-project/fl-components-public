@@ -1,63 +1,113 @@
 import atexit
+from dataclasses import dataclass
+from typing import Callable
+
 import pika
-from typing import Callable, cast
-
+import pika.adapters.blocking_connection
 import pika.channel
-
-from .utils import MutableBoolean, ensure_bool
-
-# Global variables for connection and channel
-_connection = cast(pika.BlockingConnection, None)
-_channel = cast(pika.channel.Channel, None)
-_queue_name = cast(str, None)
-_is_configured = MutableBoolean(False)
+from pika import spec
 
 
-def configure(
-    user: str = "guest",
-    password: str = "guest",
-    host: str = "localhost",
-    port: int = 5672,
-    queue_name: str = "fml-engine",
-) -> None:
-    global _connection, _channel, _queue_name, _is_configured
-    if _is_configured:
-        raise RuntimeError("RabbitMQ client is already configured.")
+@dataclass
+class RabbitConfig:
+    user: str
+    password: str
+    host: str
+    port: int
 
-    _queue_name = queue_name
-    credentials = pika.PlainCredentials(user, password)
-    parameters = pika.ConnectionParameters(
-        host=host, port=port, credentials=credentials, heartbeat=10000
+
+class PikaInitializer:
+    def __init__(self, config: RabbitConfig, heartbeat: int) -> None:
+        self.config = config
+        self.credentials = pika.PlainCredentials(config.user, config.password)
+        self.parameters = pika.ConnectionParameters(
+            host=config.host,
+            port=config.port,
+            credentials=self.credentials,
+            heartbeat=heartbeat,
+        )
+        self.connection = pika.BlockingConnection(self.parameters)
+        self.channel = self.connection.channel()
+        atexit.register(self._close_connection)
+
+    def _close_connection(self) -> None:
+        if self.channel and self.channel.is_open:
+            self.channel.close()
+        if self.connection and self.connection.is_open:
+            self.connection.close()
+
+
+@dataclass
+class RabbitBinding:
+    exchange: str
+    queue: str
+    routing_key: str
+
+
+class RabbitMQClient:
+    def __init__(
+        self,
+        channel: pika.adapters.blocking_connection.BlockingChannel,
+        binding: RabbitBinding,
+        declare: bool,
+    ) -> None:
+        self._channel = channel
+        self._binding = binding
+        if declare:
+            self._channel.exchange_declare(binding.exchange, durable=True)
+            self._channel.queue_declare(binding.queue, durable=True)
+            self._channel.queue_bind(
+                binding.queue, binding.exchange, binding.routing_key
+            )
+
+    def publish_message(self, message: str) -> None:
+        self._channel.basic_publish(
+            exchange=self._binding.exchange,
+            routing_key=self._binding.routing_key,
+            body=message,
+        )
+
+    def listen(self, callback: Callable | None, blocking: bool = True) -> None | str:
+        if blocking:
+            if callback is None:
+                raise ValueError("Callback must be provided when blocking is True")
+            self._channel.basic_consume(
+                queue=self._binding.queue, on_message_callback=callback, auto_ack=True
+            )
+            self._channel.start_consuming()
+            return None
+        else:
+            method_frame: spec.Basic.GetOk | None
+            header_frame: spec.BasicProperties | None
+            body: bytes | None
+            decoded_body: str | None = None
+            method_frame, header_frame, body = self._channel.basic_get(
+                queue=self._binding.queue, auto_ack=True
+            )
+            if (
+                method_frame is not None
+                and header_frame is not None
+                and body is not None
+            ):
+                decoded_body = body.decode("utf-8")
+            return decoded_body
+
+
+def setup_rabbitmq(
+    user: str,
+    password: str,
+    host: str,
+    port: int,
+    heartbeat: int,
+    topic: str,
+    declare: bool,
+) -> RabbitMQClient:
+    rabbitmq_config = RabbitConfig(
+        user,
+        password,
+        host,
+        port,
     )
-
-    _connection = pika.BlockingConnection(parameters)
-    _channel = _connection.channel()
-    _channel.queue_declare(queue=_queue_name, durable=True)
-    _is_configured.value = True
-
-
-def _close_connection() -> None:
-    global _connection, _channel
-    if _channel and _channel.is_open:
-        _channel.close()
-    if _connection and _connection.is_open:
-        _connection.close()
-
-
-@ensure_bool(_is_configured)
-def publish_message(message: str) -> None:
-    _channel.basic_publish(exchange="", routing_key=_queue_name, body=message)
-
-
-@ensure_bool(_is_configured)
-def listen(callback: Callable) -> None:
-    _channel.basic_consume(
-        queue=_queue_name, on_message_callback=callback, auto_ack=True
-    )
-    try:
-        _channel.start_consuming()
-    except KeyboardInterrupt:
-        _channel.stop_consuming()
-
-
-atexit.register(_close_connection)
+    init = PikaInitializer(rabbitmq_config, heartbeat)
+    binding = RabbitBinding(exchange="fl", queue=topic, routing_key=topic)
+    return RabbitMQClient(init.channel, binding, declare=declare)

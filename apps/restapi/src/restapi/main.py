@@ -1,26 +1,46 @@
 from contextlib import asynccontextmanager
-from typing import Any
+from threading import Event
+from typing import AsyncGenerator
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-
+from restapi import config
+from restapi.status_updates import StatusUpdates
 from restapi.db import create_db_and_tables
 from restapi.routers import tasks
-from restapi import config
 
-from interfaces import rabbitmq_client
+from interfaces.rabbitmq_client import setup_rabbitmq
 
 
 def create_app() -> FastAPI:
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> Any:
-        rabbitmq_client.configure(
+    async def lifespan(app: FastAPI) -> AsyncGenerator:
+        # init rabbitmq
+        config.obj["rabbitmq_dispatch"] = setup_rabbitmq(
             config.RABBIT_USERNAME,
             config.RABBIT_PASSWORD,
-            host=config.RABBIT_HOST,
-            port=int(config.RABBIT_PORT),
+            config.RABBIT_HOST,
+            int(config.RABBIT_PORT),
+            1000,
+            "dispatch",
+            True,
         )
+        config.obj["rabbitmq_status"] = setup_rabbitmq(
+            config.RABBIT_USERNAME,
+            config.RABBIT_PASSWORD,
+            config.RABBIT_HOST,
+            int(config.RABBIT_PORT),
+            1000,
+            "status",
+            True,
+        )
+        # init status updates thread
+        event = Event()
+        thread = StatusUpdates(event)
+        thread.start()
+        # init db
         create_db_and_tables()
         yield
 
