@@ -11,14 +11,18 @@ from schemas.task import Task
 SUPERLINK_URL = ""
 
 
-def configure() -> None:
+def configure() -> rabbitmq_client.RabbitMQClient:
     mlflow_client.setup_mlflow(config.MLFLOW_URL, is_central_node=True)
-    rabbitmq_client.configure(
-        user=config.RABBIT_USERNAME,
-        password=config.RABBIT_PASSWORD,
-        host=config.RABBIT_HOST,
-        port=int(config.RABBIT_PORT),
+    rabbitmq = rabbitmq_client.setup_rabbitmq(
+        config.RABBIT_USERNAME,
+        config.RABBIT_PASSWORD,
+        config.RABBIT_HOST,
+        int(config.RABBIT_PORT),
+        1000,
+        "dispatch",
+        False,
     )
+    return rabbitmq
 
 
 def event_handler(
@@ -43,6 +47,6 @@ if __name__ == "__main__":  # pragma: no cover
     args = parser.parse_args()
     SUPERLINK_URL = args.superlink
 
-    configure()
+    rabbitmq = configure()
     while True:
-        rabbitmq_client.listen(event_handler)
+        rabbitmq.listen(event_handler)

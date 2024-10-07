@@ -12,7 +12,7 @@ from fl_models.iris.fl_model import log_model
 
 log_model()
 
-requests.post(
+response = requests.post(
     "http://synthema-fl-restapi:8000/tasks",
     json={
         "user_id": "1",
@@ -53,4 +53,12 @@ while run.info.status in {"RUNNING", "SCHEDULED"}:
 
 if run.info.status != "FINISHED":
     print(f"Expected run status to be FINISHED, but got {run.info.status}")
+    exit(1)
+
+# Check that the status was set to success
+time.sleep(10)
+task_id = response.json()["id"]
+response2 = requests.get(f"http://synthema-fl-restapi:8000/tasks/{task_id}")
+if response2.json()["status"] != "success":
+    print(f"Expected task status to be success, but got {response2.json()['status']}")
     exit(1)

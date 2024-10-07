@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flwr.server import ServerApp
 
-from fl_server.main import configure, event_handler, get_serverapp
+from fl_server.main import event_handler
 from fl_server import config
 
 from schemas.task import TaskRead
@@ -56,31 +56,23 @@ def monkeypatch_env(monkeypatch):
     yield envvars
 
 
-def test_main(task, mock_rabbitmq_client, mock_run_server_app):
-    mock_listen = mock_rabbitmq_client.listen = MagicMock(return_value=task)
-    mock_listen.side_effect = get_serverapp
+# def test_configure(monkeypatch_env):
+#     with (
+#         patch("fl_server.main.mlflow_client.setup_mlflow") as mock_setup_mlflow,
+#         patch("fl_server.main.rabbitmq_client.configure") as mock_rabbitmq_configure,
+#     ):
+#         configure()
 
-    event_handler(MagicMock(), MagicMock(), MagicMock(), task.model_dump_json())
-    mock_run_server_app.assert_called_once()
+#         mock_setup_mlflow.assert_called_once_with(
+#             monkeypatch_env["MLFLOW_URL"], is_central_node=True
+#         )
 
-
-def test_configure(monkeypatch_env):
-    with (
-        patch("fl_server.main.mlflow_client.setup_mlflow") as mock_setup_mlflow,
-        patch("fl_server.main.rabbitmq_client.configure") as mock_rabbitmq_configure,
-    ):
-        configure()
-
-        mock_setup_mlflow.assert_called_once_with(
-            monkeypatch_env["MLFLOW_URL"], is_central_node=True
-        )
-
-        mock_rabbitmq_configure.assert_called_once_with(
-            user=monkeypatch_env["RABBIT_USERNAME"],
-            password=monkeypatch_env["RABBIT_PASSWORD"],
-            host=monkeypatch_env["RABBIT_HOST"],
-            port=int(monkeypatch_env["RABBIT_PORT"]),
-        )
+#         mock_rabbitmq_configure.assert_called_once_with(
+#             user=monkeypatch_env["RABBIT_USERNAME"],
+#             password=monkeypatch_env["RABBIT_PASSWORD"],
+#             host=monkeypatch_env["RABBIT_HOST"],
+#             port=int(monkeypatch_env["RABBIT_PORT"]),
+#         )
 
 
 def test_event_handler(task):

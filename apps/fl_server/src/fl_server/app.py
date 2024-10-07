@@ -6,7 +6,7 @@ from fl_server import stages
 from fl_server import config
 from fl_server.utils import mlflow_utils
 
-from interfaces import mlflow_client
+from interfaces import mlflow_client, rabbitmq_client
 from schemas.task import Task
 
 
@@ -58,6 +58,19 @@ def _training_loop(
 def get_serverapp(task: Task) -> ServerApp:
     def server_main(driver: Driver, context: Context) -> None:
         global global_vars
+        # Create rabbit client for updates
+        rabbitmq = rabbitmq_client.setup_rabbitmq(
+            config.RABBIT_USERNAME,
+            config.RABBIT_PASSWORD,
+            config.RABBIT_HOST,
+            int(config.RABBIT_PORT),
+            1000,
+            "status",
+            True,
+        )
+
+        rabbitmq.publish_message(f"Task {task.id} running")
+
         # Get node IDs
         node_ids = driver.get_node_ids()
 
@@ -95,6 +108,8 @@ def get_serverapp(task: Task) -> ServerApp:
         print("Clean run details")
         mlflow_client.clean_current_config()
         requires.clean_config(driver, filtered_node_ids)
+
+        rabbitmq.publish_message(f"Task {task.id} success")
 
     app = ServerApp()
     app._main = server_main

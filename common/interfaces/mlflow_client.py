@@ -27,6 +27,7 @@ class __Config:
         model_description (Optional[str]): A description of the model.
         is_central_node (Optional[bool]): Whether this is a central node in the configuration.
     """
+
     experiment_id: Optional[str] = None
     parent_run_id: Optional[str] = None
     child_run_id: Optional[str] = None
