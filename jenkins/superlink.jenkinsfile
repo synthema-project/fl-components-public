@@ -1,0 +1,36 @@
+pipeline {
+    agent {
+        node {
+            label 'jenkins-dev'
+        }
+    }
+    environment {
+        APP_NAME = "fl-superlink"
+    }
+
+    stages {
+        // **************
+        // *** Deploy ***
+        // **************
+        stage("Deployment"){
+            steps {
+                withKubeConfig([credentialsId: 'k8s-admin']) {
+                    sh '''
+                    kubectl apply -f k8s/superlink-dev.yaml
+                    '''
+               }
+            }
+        }
+    }
+    // post{
+        // failure{
+        //     // slackSend (color: "#FF0000", message: "Job FAILED: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        //     sh 'docker image rm ${APP_NAME}:test &> /dev/null || True'
+        //     sh 'DOCKER_TAG=test docker compose down --rmi all'
+        // }
+
+        // success{
+        //     slackSend (color: "#008000", message: "Job SUCCESSFUL: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        // }
+    // }
+}
