@@ -16,6 +16,8 @@ spec:
       containers:
       - name: superlink-container
         image: flwr/superlink:1.9.0
+        command: ["flower-superlink"]
+        args: ["--insecure"]
         resources:
           limits:
             memory: "512Mi"
