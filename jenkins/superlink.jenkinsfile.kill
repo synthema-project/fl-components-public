@@ -1,0 +1,21 @@
+pipeline {
+    agent {
+        node {
+            label 'jenkins-dev'
+        }
+    }
+
+    stages {
+
+        // ****************
+        // *** KILL APP ***
+        // ****************
+        stage("Kill_The_App"){
+            steps {
+               withKubeConfig([credentialsId: 'k8s-admin']) {
+                   sh 'kubectl delete -f k8s/superlink-dev.yaml || true'
+               }
+            }
+        }
+    }
+}
