@@ -65,13 +65,19 @@ def test_create_child_run():
     with patch("interfaces.mlflow_client._mlflow_client.create_run") as mock_create_run:
         info = Mock(run_id=run_id)
         mock_create_run.return_value = Mock(info=info)
-
-        run_id = mlflow_client.create_child_run(experiment_id, parent_run_id, node_name)
+        with patch("interfaces.mlflow_client.mlflow.start_run") as mock_start_run:
+            run_id = mlflow_client.create_child_run(
+                experiment_id, parent_run_id, node_name
+            )
 
     mock_create_run.assert_called_once_with(
         experiment_id=experiment_id,
         run_name=node_name,
         tags={mlflow_client.MLFLOW_PARENT_RUN_ID: parent_run_id},
+    )
+
+    mock_start_run.assert_called_once_with(
+        experiment_id=experiment_id, run_id=run_id, log_system_metrics=True
     )
 
     assert run_id == "test_run_id"

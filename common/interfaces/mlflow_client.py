@@ -11,6 +11,8 @@ from mlflow.data.http_dataset_source import HTTPDatasetSource
 
 from .utils import ensure_bool, MutableBoolean
 
+mlflow.set_system_metrics_sampling_interval(0.5)
+
 
 class __Config:
     """
@@ -117,6 +119,9 @@ def create_child_run(experiment_id: str, parent_run_id: str, node_name: str) -> 
         run_name=node_name,
         tags={MLFLOW_PARENT_RUN_ID: parent_run_id},
     )
+    mlflow.start_run(
+        experiment_id=experiment_id, run_id=run.info.run_id, log_system_metrics=True
+    )
     return str(run.info.run_id)
 
 
@@ -164,6 +169,7 @@ def clean_current_config() -> None:
     # _current_config.clean()
     if _current_config.is_central_node:
         _mlflow_client.update_run(_current_config.parent_run_id, "FINISHED")
+    mlflow.end_run()
     _mlflow_client.update_run(_current_config.child_run_id, "FINISHED")
     _configured.value = False
 
@@ -197,6 +203,8 @@ def upload_final_state(
         dict: A dictionary containing information about the registered model.
     """
     name = f"trained_{_current_config.model_name}"
+    if mlflow.active_run():
+        mlflow.end_run()
     with mlflow.start_run(
         run_id=_current_config.parent_run_id,
     ):
@@ -241,8 +249,7 @@ def log_metrics(
         metrics (dict): A dictionary containing metric names and their values.
         step (int): The training step at which the metrics are logged.
     """
-    with mlflow.start_run(run_id=_current_config.child_run_id):
-        mlflow.log_metrics(metrics, step=step)
+    mlflow.log_metrics(metrics, step=step)
 
 
 @ensure_bool(_configured)
@@ -258,5 +265,4 @@ def set_dataset_signature(node_name: str, path: str, run_id: str) -> None:
     """
     source = HTTPDatasetSource(f"{node_name}://{path}")
     dataset = MetaDataset(source)
-    with mlflow.start_run(run_id=run_id):
-        mlflow.log_input(dataset, "training")
+    mlflow.log_input(dataset, "training")
