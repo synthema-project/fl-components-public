@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fl-cl-deployment
+  labels:
+    app: fl-cl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fl-cl
+  template:
+    metadata:
+      labels:
+        app: fl-cl
+    spec:
+      imagePullSecrets:
+        - name: harbor-cred
+      containers:
+      - name: fl-cl-container
+        image: harbor.synthema.rid-intrasoft.eu/fl/synthema-fl-client:0.0.1
+        imagePullPolicy: Always
+        command: ["flower-client-app"]
+        args: [
+            "--insecure",
+            "--superlink", "fl-superlink-svc:9092",
+            "fl_client.main:app"
+        ] 
+        env:
+        - name: NODE_NAME
+          value: "test_node"
+        - name: MLFLOW_URL
+          value: "http://mlflow-dsb-svc"
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "250m"

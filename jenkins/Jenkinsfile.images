@@ -1,0 +1,87 @@
+pipeline {
+    agent {
+        node {
+            label 'jenkins-dev'
+        }
+    }
+    environment {
+        DOCKER_REG = "harbor.synthema.rid-intrasoft.eu"
+        DOCKER_REPO = "/fl/"
+        DOCKER_REG_CREDS = "harbor-jenkins-creds"
+    }
+
+    stages {
+        stage("Define version"){
+            steps {
+                script {
+                    def version = readFile('version').trim()
+                    echo "Version: ${version}"
+                    env.VERSION = "${version}"
+                }
+            }
+        }
+        // *************************
+        // *** IMAGE BUILD STAGE ***
+        // *************************
+        stage("Build_Images"){
+            steps {
+                echo "***** Building Image *****"
+                echo "Using version: ${env.VERSION}"
+                // Build the image and push a test tag to the remote repository
+                echo "Running: bash scripts/images_build.sh build ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
+                sh "bash scripts/images_build.sh build ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
+            }
+        }
+
+        // *************************
+        // *** TESTS ***
+        // *************************
+        stage("Unit_Tests"){
+            steps{
+                echo "***** Running Unit Tests *****"
+                sh "bash scripts/images_test.sh ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
+            }
+        }
+        // stage ("E2E_Tests"){
+        //     steps{
+        //         echo "***** Running E2E Tests *****"
+        //         sh "bash e2e/docker_full/run.sh"
+        //     }
+        // }
+
+        // *******************************
+        // *** Push Images To Registry ***
+        // *******************************
+        stage("Push_Image"){
+            when {
+                anyOf {
+                    environment name: "GIT_BRANCH", value: "origin/master"
+                    environment name: "GIT_BRANCH", value: "origin/dev"
+                }
+            }
+            steps {
+                withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'harbor-jenkins-creds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]){
+                    echo "***** Push Container Image *****"
+                    // Login to the remote Docker Registry
+                    sh 'docker login -u ${USERNAME} -p ${PASSWORD} ${DOCKER_REG}'
+                    sh "bash scripts/images_push.sh ${DOCKER_REG}${DOCKER_REPO} ${env.VERSION}"
+                }
+            }
+        }
+    }
+    post{
+        always {
+            echo "***** Clean Up Resources *****"
+            sh "bash scripts/images_build.sh clean ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
+        }
+        // failure{
+        //     // slackSend (color: "#FF0000", message: "Job FAILED: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        //     sh 'docker image rm ${APP_NAME}:test &> /dev/null || True'
+        //     sh 'DOCKER_TAG=test docker compose down --rmi all'
+        // }
+
+        // success{
+        //     slackSend (color: "#008000", message: "Job SUCCESSFUL: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        // }
+    }
+}

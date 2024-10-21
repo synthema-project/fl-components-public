@@ -169,9 +169,11 @@ def test_get_serverapp(task, driver, node_ids, parameters):
             "fl_server.app.mlflow_client.clean_current_config"
         ) as mock_mlflow_client_clean_current_config,
         patch("fl_server.app.requires.clean_config") as mock_requires_clean_config,
+        patch("fl_server.app.rabbitmq_client.setup_rabbitmq") as mock_setup_rabbitmq,
     ):
         mock_requires_filter_clients.return_value = filtered_node_ids
         mock_requires_get_parameters_from_one_node.return_value = parameters
+        mock_setup_rabbitmq.return_value = MagicMock()
 
         app = get_serverapp(task)
         app._main(driver, context)

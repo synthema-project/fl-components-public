@@ -1,0 +1,77 @@
+pipeline {
+    agent {
+        node {
+            label 'jenkins-dev'
+        }
+    }
+    environment {
+        DOCKER_REG = "harbor.synthema.rid-intrasoft.eu"
+        DOCKER_REPO = "/fl/"
+        DOCKER_REG_CREDS = "harbor-jenkins-creds"
+    }
+
+    stages {
+        stage("Define version"){
+            steps {
+                script {
+                    def version = readFile('version').trim()
+                    echo "Version: ${version}"
+                    env.VERSION = "${version}"
+                }
+            }
+        }
+        // *************************
+        // *** TESTS ***
+        // *************************
+
+        stage("Helm_Checks"){
+            steps{
+                withKubeConfig([credentialsId: 'k8s-admin']){
+                    echo "***** Running Helm Checks *****"
+                    sh "helm lint fl-chart"
+                    sh "helm install fl-chart ./fl-chart --dry-run --debug -f k8s/dev-values.yaml"
+                }
+            }
+        }
+        // *************************
+        // *** HELM PACKAGE ***
+        // *************************
+        stage("Helm_Package"){
+            steps {
+                echo "***** Helm Package *****"
+                echo "Using version: ${env.VERSION}"
+                // Package the Helm chart
+                sh "helm package fl-chart --version ${env.VERSION}"
+            }
+        }
+
+        // *************************
+        // *** HELM PUSH ***
+        // *************************
+        stage("Helm_Push"){
+            steps {
+                withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'harbor-jenkins-creds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]){
+                    echo "***** Helm Push *****"
+                    sh 'helm registry login -u ${USERNAME} -p ${PASSWORD} ${DOCKER_REG}'
+                    // Push the Helm chart to the repository
+                    sh "helm push fl-chart-${env.VERSION}.tgz oci://${DOCKER_REG}${DOCKER_REPO}"
+                }
+            }
+        }
+    }
+    post{
+        always{
+            echo "***** Clean Up *****"
+            sh "rm -f fl-chart-${env.VERSION}.tgz"
+        }
+        // failure{
+        //     // slackSend (color: "#FF0000", message: "Job FAILED: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        //     sh 'docker image rm ${APP_NAME}:test &> /dev/null || True'
+        //     sh 'DOCKER_TAG=test docker compose down --rmi all'
+        // }
+
+        // success{
+        //     slackSend (color: "#008000", message: "Job SUCCESSFUL: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        // }
+    }
+}

@@ -5,11 +5,12 @@ import docker
 from docker.errors import ImageNotFound
 
 # Argument parser setup
-parser = argparse.ArgumentParser(description="Start the FastAPI app")
+parser = argparse.ArgumentParser()
 parser.add_argument(
     "--mode", type=str, choices=["build", "clean"], help="Action to trigger in Docker"
 )
 parser.add_argument("--version", type=str, help="Version to tag the Docker images with")
+
 args = parser.parse_args()
 mode = args.mode
 version = args.version

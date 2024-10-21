@@ -1,0 +1,22 @@
+deps:
+  postgres:
+    host: "mstorage-svc"
+    port: "5432"
+  rabbit:
+    host: "pub-sub-rabbitmq"
+    port: "5672"
+  mlflow:
+    url: "http://mlflow-dsb-svc"
+    
+
+restapi:
+  image: "harbor.synthema.rid-intrasoft.eu/fl/synthema-fl-restapi"
+  tag: "0.0.1"
+  port: "8000"
+  imagePullSecrets: harbor-cred
+
+fl_server:
+  image: "harbor.synthema.rid-intrasoft.eu/fl/synthema-fl-server"
+  tag: "0.0.1"
+  superlink_url: "fl-superlink-svc:9091"
+  imagePullSecrets: harbor-cred

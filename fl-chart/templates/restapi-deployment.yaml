@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restapi-deployment
+  labels:
+    app: restapi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: restapi
+  template:
+    metadata:
+      labels:
+        app: restapi
+    spec:
+      {{- if .Values.restapi.imagePullSecrets }}
+      imagePullSecrets:
+        - name: {{ .Values.restapi.imagePullSecrets }}
+      {{- end }}
+      containers:
+      - name: restapi-container
+        image: {{ .Values.restapi.image }}:{{ .Values.restapi.tag }}
+        imagePullPolicy: Always
+        command: ["python"]
+        args: [
+            "-m", "src.restapi.main",
+            "--port", "{{ .Values.restapi.port }}"
+        ] 
+        ports:
+        - containerPort: {{ .Values.restapi.port }}
+        env:
+        - name: DB_ECHO
+          value: "True"
+        - name: POSTGRES_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: fl-secrets
+              key: postgres_username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: fl-secrets
+              key: postgres_password
+        - name: POSTGRES_HOST
+          value: {{ .Values.deps.postgres.host }}
+        - name: POSTGRES_PORT
+          value: "{{ .Values.deps.postgres.port }}"
+        - name: POSTGRES_DB
+          value: fed_learning
+        - name: RABBIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: fl-secrets
+              key: rabbit_username
+        - name: RABBIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: fl-secrets
+              key: rabbit_password
+        - name: RABBIT_HOST
+          value: {{ .Values.deps.rabbit.host }}
+        - name: RABBIT_PORT
+          value: "{{ .Values.deps.rabbit.port }}"
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "250m"

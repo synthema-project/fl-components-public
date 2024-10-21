@@ -1,0 +1,50 @@
+pipeline {
+    agent {
+        node {
+            label 'jenkins-dev'
+        }
+    }
+    environment {
+        DOCKER_REG = "harbor.synthema.rid-intrasoft.eu"
+        DOCKER_REPO = "/fl/"
+        DOCKER_REG_CREDS = "harbor-jenkins-creds"
+    }
+
+    stages {
+        stage("Define version"){
+            steps {
+                script {
+                    def version = readFile('version').trim()
+                    echo "Version: ${version}"
+                    env.VERSION = "${version}"
+                }
+            }
+        }
+
+        // *************************
+        // *** HELM Deploy ***
+        // *************************
+        stage("Helm_Deploy"){
+            steps {
+                withKubeConfig([credentialsId: 'k8s-admin']){
+                    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'harbor-jenkins-creds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]){
+                        echo "***** Helm Deploy *****"
+                        sh 'helm registry login -u ${USERNAME} -p ${PASSWORD} ${DOCKER_REG}'
+                        sh "helm upgrade --install fl-chart oci://${DOCKER_REG}${DOCKER_REPO}fl-chart --version ${env.VERSION} -f k8s/dev-values.yaml --namespace synthema-dev"
+                    }
+                }
+            }
+        }
+    }
+    // post{
+        // failure{
+        //     // slackSend (color: "#FF0000", message: "Job FAILED: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        //     sh 'docker image rm ${APP_NAME}:test &> /dev/null || True'
+        //     sh 'DOCKER_TAG=test docker compose down --rmi all'
+        // }
+
+        // success{
+        //     slackSend (color: "#008000", message: "Job SUCCESSFUL: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
+        // }
+    // }
+}
