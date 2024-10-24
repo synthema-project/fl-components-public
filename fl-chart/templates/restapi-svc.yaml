@@ -7,4 +7,4 @@ spec:
     app: fl-restapi
   ports:
     - protocol: TCP
-      port: {{ .Values.restapi.port }}
+      port: {{ .Values.fl_restapi.port }}
