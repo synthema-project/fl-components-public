@@ -1,34 +1,34 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: restapi-deployment
+  name: fl-restapi-deployment
   labels:
-    app: restapi
+    app: fl-restapi
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: restapi
+      app: fl-restapi
   template:
     metadata:
       labels:
-        app: restapi
+        app: fl-restapi
     spec:
-      {{- if .Values.restapi.imagePullSecrets }}
+      {{- if .Values.fl_restapi.imagePullSecrets }}
       imagePullSecrets:
-        - name: {{ .Values.restapi.imagePullSecrets }}
+        - name: {{ .Values.fl_restapi.imagePullSecrets }}
       {{- end }}
       containers:
-      - name: restapi-container
-        image: {{ .Values.restapi.image }}:{{ .Values.restapi.tag }}
+      - name: fl-restapi-container
+        image: {{ .Values.fl_restapi.image }}:{{ .Values.fl_restapi.tag }}
         imagePullPolicy: Always
         command: ["python"]
         args: [
             "-m", "src.restapi.main",
-            "--port", "{{ .Values.restapi.port }}"
+            "--port", "{{ .Values.fl_restapi.port }}"
         ] 
         ports:
-        - containerPort: {{ .Values.restapi.port }}
+        - containerPort: {{ .Values.fl_restapi.port }}
         env:
         - name: DB_ECHO
           value: "True"

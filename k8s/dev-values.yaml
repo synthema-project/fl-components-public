@@ -9,7 +9,7 @@ deps:
     url: "http://mlflow-dsb-svc"
     
 
-restapi:
+fl_restapi:
   image: "harbor.synthema.rid-intrasoft.eu/fl/synthema-fl-restapi"
   tag: "0.0.1"
   port: "8000"

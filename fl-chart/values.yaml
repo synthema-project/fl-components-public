@@ -9,7 +9,7 @@ deps:
     url: "http://synthema-mlflow:5000"
     
 
-restapi:
+fl_restapi:
   # image: "harbor.synthema.rid-intrasoft.eu/synthema/fl-restapi"
   image: "synthema-fl-restapi"
   # tag: "0.0.0"
