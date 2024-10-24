@@ -3,6 +3,7 @@ kind: Service
 metadata:
   name: fl-restapi-svc
 spec:
+  type: NodePort
   selector:
     app: fl-restapi
   ports:
