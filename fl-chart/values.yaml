@@ -1,0 +1,22 @@
+deps:
+  postgres:
+    host: "pg-svc.default"
+    port: "5432"
+  rabbit:
+    host: "rabbitmq.default"
+    port: "5672"
+  mlflow:
+    url: "http://synthema-mlflow:5000"
+    
+
+fl_restapi:
+  # image: "harbor.synthema.rid-intrasoft.eu/synthema/fl-restapi"
+  image: "synthema-fl-restapi"
+  # tag: "0.0.0"
+  tag: "test"
+  port: "8000"
+
+fl_server:
+  image: "synthema-fl-server"
+  tag: "test"
+  superlink_url: "fl-superlink-svc:9091"

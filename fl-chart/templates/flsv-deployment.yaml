@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fl-sv-deployment
+  labels:
+    app: fl-sv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fl-sv
+  template:
+    metadata:
+      labels:
+        app: fl-sv
+    spec:
+      {{- if .Values.fl_server.imagePullSecrets }}
+      imagePullSecrets:
+        - name: {{ .Values.fl_server.imagePullSecrets }}
+      {{- end }}
+      containers:
+      - name: fl-sv-container
+        image: {{ .Values.fl_server.image }}:{{ .Values.fl_server.tag }}
+        imagePullPolicy: Always
+        command: ["python"]
+        args: [
+            "-m", "src.fl_server.main",
+            "--superlink", "{{ .Values.fl_server.superlink_url }}"
+        ] 
+        env:
+        - name: RABBIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: fl-secrets
+              key: rabbit_username
+        - name: RABBIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: fl-secrets
+              key: rabbit_password
+        - name: RABBIT_HOST
+          value: {{ .Values.deps.rabbit.host }}
+        - name: RABBIT_PORT
+          value: "{{ .Values.deps.rabbit.port }}"
+        - name: MLFLOW_URL
+          value: {{ .Values.deps.mlflow.url }}
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "250m"

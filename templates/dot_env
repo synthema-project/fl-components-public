@@ -2,6 +2,21 @@ PYTHONPATH=${PYTHONPATH}:.
 MYPYPATH=${MYPYPATH}:.
 PYTHONDONTWRITEBYTECODE=True
 
+
 MLFLOW_URL=http://localhost:30246
 NODE_NAME=test_node
-DATA_PATH=/Users/borja/Projects/synthema/wp2/fl-components/common/data/iris.csv
+DATA_PATH=/Users/borja/Projects/synthema/wp2/fl-components/common/fl_models/iris/data.csv
+
+
+RABBIT_USERNAME=guest
+RABBIT_PASSWORD=guest
+RABBIT_HOST=localhost
+RABBIT_PORT=31871
+
+POSTGRES_USERNAME=username
+POSTGRES_PASSWORD=password
+POSTGRES_HOST=localhost
+POSTGRES_PORT=32549
+POSTGRES_DB=postgres
+
+DB_ECHO=False

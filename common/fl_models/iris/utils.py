@@ -38,7 +38,9 @@ class Utils:
         return ParametersRecord(state_dict)
 
     @staticmethod
-    def pytorch_to_parameter_record(state_dict):
+    def pytorch_to_parameter_record(
+        state_dict: dict,
+    ) -> ParametersRecord:
         """Serialise your PyTorch model."""
         transformed_state_dict = OrderedDict()
 
@@ -48,7 +50,9 @@ class Utils:
         return ParametersRecord(transformed_state_dict)
 
     @staticmethod
-    def parameters_to_pytorch_state_dict(params_record: ParametersRecord):
+    def parameters_to_pytorch_state_dict(
+        params_record: ParametersRecord,
+    ) -> dict:
         # Make sure to import locally torch as it is only available in the server
         import torch
 

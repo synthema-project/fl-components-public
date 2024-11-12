@@ -163,3 +163,4 @@ cython_debug/
 .pants.d
 mlruns
 .vscode
+test.db

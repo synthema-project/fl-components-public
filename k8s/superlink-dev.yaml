@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superlink-deployment
+  namespace: synthema-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: superlink
+  template:
+    metadata:
+      labels:
+        app: superlink
+    spec:
+      containers:
+      - name: superlink-container
+        image: flwr/superlink:1.9.0
+        command: ["flower-superlink"]
+        args: ["--insecure"]
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+        ports:
+        - containerPort: 9091
+        - containerPort: 9092
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fl-superlink-svc
+  namespace: synthema-dev
+spec:
+  selector:
+    app: superlink
+  ports:
+  - protocol: TCP
+    port: 9091
+    name: server-entrypoint
+  - protocol: TCP
+    port: 9092
+    name: client-entrypoint
+  type: ClusterIP
