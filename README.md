@@ -78,3 +78,27 @@ To run an end to end example, the easiest option is to run the preloaded model t
 
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+
+This project extends and uses the following Open Softwares, which are compliant with MIT License:
+- FastAPI (MIT License)
+- fastapi-cli (MIT License)
+- Jinja (MIT License)
+- email_validator  (MIT License)
+- pydantic  (MIT License)
+- python-multipart (MIT License)
+- pytest (MIT License)
+- Uvicorn (MIT License)
+- starlette  (MIT License)
+- httpx (MIT License)
+- setuptools (MIT License)
+- sqlmodel (MIT License)
+- pika (MIT License)
+- Flower (Apache 2.0 License)
+- MLFlow (Apache 2.0 License)
+- boto3 (Apache 2.0 License)
+- Numpy (BSD License)
+- Pandas (BSD License)
+- torch (BSD License)
+- psycopg2-binary (PostgreSQL License)
+- typing-extensions (PSF License)
+- Psutil (PSL License)
