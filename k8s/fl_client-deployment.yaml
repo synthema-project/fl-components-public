@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fl-cl-deployment
+  name: fl-client-deployment
   labels:
-    app: fl-cl
+    app: fl-client
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: fl-cl
+      app: fl-client
   template:
     metadata:
       labels:
-        app: fl-cl
+        app: fl-client
     spec:
       imagePullSecrets:
         - name: harbor-cred
@@ -30,7 +30,7 @@ spec:
         - name: NODE_NAME
           value: "test_node"
         - name: MLFLOW_URL
-          value: "http://mlflow-dsb-svc"
+          value: "http://experiment-model-registry-service"
         resources:
           limits:
             memory: "512Mi"
