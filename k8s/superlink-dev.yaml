@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: superlink-deployment
+  name: fl-superlink-deployment
   namespace: synthema-dev
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: superlink
+      app: fl-superlink-deployment
   template:
     metadata:
       labels:
-        app: superlink
+        app: fl-superlink-deployment
     spec:
       containers:
       - name: superlink-container
@@ -32,11 +32,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: fl-superlink-svc
+  name: fl-superlink-service
   namespace: synthema-dev
 spec:
   selector:
-    app: superlink
+    app: fl-superlink-deployment
   ports:
   - protocol: TCP
     port: 9091
