@@ -1,0 +1,8 @@
+{
+    "images": [
+        {"name": "synthema-fl-common", "path": "common"},
+        {"name": "synthema-fl-client", "path": "apps/fl_client", "buildargs": true, "test": true, "push": true},
+        {"name": "synthema-fl-server", "path": "apps/fl_server", "buildargs": true, "test": true, "push": true},
+        {"name": "synthema-fl-restapi", "path": "apps/restapi", "buildargs": true, "test":true, "push": true}
+    ]
+}

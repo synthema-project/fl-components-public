@@ -2,7 +2,7 @@ script_dir="$(dirname "$(realpath "$0")")"
 cd $script_dir || exit
 
 docker compose down --remove-orphans -v
-docker compose up --build --exit-code-from synthema-fl-test
+docker compose up --exit-code-from synthema-fl-test
 
 if [ $? -eq 0 ]; then
   echo "e2e test passed"

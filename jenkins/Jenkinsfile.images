@@ -28,8 +28,7 @@ pipeline {
                 echo "***** Building Image *****"
                 echo "Using version: ${env.VERSION}"
                 // Build the image and push a test tag to the remote repository
-                echo "Running: bash scripts/images_build.sh build ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
-                sh "bash scripts/images_build.sh build ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
+                sh "python3 scripts/images.py --mode build --tag test"
             }
         }
 
@@ -39,24 +38,22 @@ pipeline {
         stage("Unit_Tests"){
             steps{
                 echo "***** Running Unit Tests *****"
-                sh "bash scripts/images_test.sh ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
+                sh "python3 scripts/images.py --mode test --tag test"
             }
         }
-        // stage ("E2E_Tests"){
-        //     steps{
-        //         echo "***** Running E2E Tests *****"
-        //         sh "bash e2e/docker_full/run.sh"
-        //     }
-        // }
-
+        stage ("E2E_Tests"){
+            steps{
+                echo "***** Running E2E Tests *****"
+                sh "bash e2e/docker_full/run.sh"
+            }
+        }
         // *******************************
         // *** Push Images To Registry ***
         // *******************************
         stage("Push_Image"){
             when {
                 anyOf {
-                    environment name: "GIT_BRANCH", value: "origin/master"
-                    environment name: "GIT_BRANCH", value: "origin/dev"
+                    environment name: "GIT_BRANCH", value: "origin/main"
                 }
             }
             steps {
@@ -64,7 +61,10 @@ pipeline {
                     echo "***** Push Container Image *****"
                     // Login to the remote Docker Registry
                     sh 'docker login -u ${USERNAME} -p ${PASSWORD} ${DOCKER_REG}'
-                    sh "bash scripts/images_push.sh ${DOCKER_REG}${DOCKER_REPO} ${env.VERSION}"
+                    sh "python3 scripts/images.py --mode tag --old-tag test --new-tag ${env.VERSION}"
+                    sh "python3 scripts/images.py --mode tag --old-tag test --new-tag latest"
+                    sh "python3 scripts/images.py --mode push --tag ${env.VERSION} --registry ${DOCKER_REG}${DOCKER_REPO}"
+                    sh "python3 scripts/images.py --mode push --tag latest --registry ${DOCKER_REG}${DOCKER_REPO}"
                 }
             }
         }
@@ -72,7 +72,7 @@ pipeline {
     post{
         always {
             echo "***** Clean Up Resources *****"
-            sh "bash scripts/images_build.sh clean ${env.VERSION} ${DOCKER_REG}${DOCKER_REPO}"
+            sh "python3 scripts/images.py --mode remove"
         }
         // failure{
         //     // slackSend (color: "#FF0000", message: "Job FAILED: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")

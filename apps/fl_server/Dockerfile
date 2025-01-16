@@ -1,7 +1,7 @@
 ARG CURRENT_VERSION
 ARG BASE_IMAGE
 
-FROM python:3.11-buster as builder
+FROM python:3.11-slim-buster as builder
 
 RUN pip install poetry
 
