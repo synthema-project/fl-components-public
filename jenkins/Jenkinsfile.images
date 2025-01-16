@@ -53,7 +53,7 @@ pipeline {
         stage("Push_Image"){
             when {
                 anyOf {
-                    environment name: "GIT_BRANCH", value: "origin/main"
+                    environment name: "GIT_BRANCH", value: "origin/dev"
                 }
             }
             steps {
