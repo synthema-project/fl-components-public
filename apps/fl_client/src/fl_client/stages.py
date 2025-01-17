@@ -15,6 +15,8 @@ def set_run_config(
     model_version: int,
     data_path: str,
 ) -> None:
+    if mlflow_client.mlflow.active_run():
+        mlflow_client.mlflow.end_run("FAILED")
     child_run_id = mlflow_client.create_child_run(
         experiment_id, parent_run_id, node_name
     )

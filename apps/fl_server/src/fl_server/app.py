@@ -11,6 +11,8 @@ from schemas.task import Task
 
 
 def _mlflow_config(task: Task, driver: Driver, node_ids: list[int]) -> None:
+    if mlflow_client.mlflow.active_run():
+        mlflow_client.mlflow.end_run("FAILED")
     experiment_id, parent_run_id, child_run_id = mlflow_utils.create_mlflow_runs(
         task.run_name, task.experiment_name
     )
