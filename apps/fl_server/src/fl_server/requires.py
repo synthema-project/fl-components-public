@@ -1,3 +1,4 @@
+from random import choice
 from typing import Callable
 
 from flwr.common import (
@@ -87,9 +88,10 @@ def load_model(
 def upload_model(
     driver: Driver, node_ids: list[int], parametersrecord: ParametersRecord
 ) -> None:
+    selected_node = [choice(node_ids)]
     execution_flow(
         driver=driver,
-        node_ids=node_ids,
+        node_ids=selected_node,
         recordset_factory=interfaces.recordset.create_upload_model_recordset,
         msg_type=MessageType.QUERY,
         msg_group="upload_model",
