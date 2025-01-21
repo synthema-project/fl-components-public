@@ -60,7 +60,7 @@ async def cancel_task(task_id: int) -> Task | Response:
         return task
 
 
-@router.delete("/delete/{task_id}")
+@router.delete("/{task_id}")
 async def delete_task(task_id: int) -> Response:
     with Session(engine) as session:
         task = session.get(Task, task_id)
