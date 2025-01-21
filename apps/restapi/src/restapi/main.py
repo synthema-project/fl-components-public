@@ -19,19 +19,19 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncGenerator:
         # init rabbitmq
         config.obj["rabbitmq_dispatch"] = setup_rabbitmq(
-            config.RABBIT_USERNAME,
-            config.RABBIT_PASSWORD,
-            config.RABBIT_HOST,
-            int(config.RABBIT_PORT),
+            config.RABBIT_USERNAME, # type: ignore
+            config.RABBIT_PASSWORD, # type: ignore
+            config.RABBIT_HOST, # type: ignore
+            int(config.RABBIT_PORT), # type: ignore
             1000,
             "dispatch",
             True,
         )
         config.obj["rabbitmq_status"] = setup_rabbitmq(
-            config.RABBIT_USERNAME,
-            config.RABBIT_PASSWORD,
-            config.RABBIT_HOST,
-            int(config.RABBIT_PORT),
+            config.RABBIT_USERNAME, # type: ignore
+            config.RABBIT_PASSWORD, # type: ignore
+            config.RABBIT_HOST, # type: ignore
+            int(config.RABBIT_PORT), # type: ignore
             1000,
             "status",
             True,

@@ -143,6 +143,13 @@ def test_load_model(driver, node_ids):
 
 
 def test_upload_model(driver, node_ids):
+    import random
+
+    random.seed(13)
+    selected_id = [random.choice(node_ids)]
+
+    random.seed(13)
+
     pr = ParametersRecord({"param1": MagicMock(Array)})
 
     with patch.object(requires, "execution_flow") as mock_flow:
@@ -150,7 +157,7 @@ def test_upload_model(driver, node_ids):
 
     mock_flow.assert_called_once_with(
         driver=driver,
-        node_ids=node_ids,
+        node_ids=selected_id,
         recordset_factory=interfaces.recordset.create_upload_model_recordset,
         msg_type=MessageType.QUERY,
         msg_group="upload_model",

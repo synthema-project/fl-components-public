@@ -192,7 +192,7 @@ def load_model() -> PyFuncModel:
 @ensure_bool(_initialized)
 def upload_final_state(
     local_learner: Any,
-) -> dict:
+) -> dict[str, Any]:
     """
     Uploads the final model state to MLflow and sets the appropriate tags and metadata.
 

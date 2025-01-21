@@ -7,7 +7,7 @@ Usage:
 
 Modes:
     build
-        Build Docker images defined in docker_config.json. 
+        Build Docker images defined in docker_config.json.
         The first image is treated as the base image, which will be built first.
         Options:
             --tag <tag>            Required. Tag for the images (e.g., 1.0.0).
@@ -46,7 +46,8 @@ import argparse
 import json
 from pathlib import Path
 import docker
-from docker.errors import ImageNotFound, APIError, BuildError
+from docker.errors import APIError, BuildError
+
 
 # ------------------------------------------------------------------------------
 # Centralized Error Handling
@@ -54,7 +55,7 @@ from docker.errors import ImageNotFound, APIError, BuildError
 def handle_error(message, exception=None, exit_program=True):
     """
     Centralized error handling function.
-    
+
     Args:
         message (str): Error message to display.
         exception (Exception, optional): Exception object to log. Defaults to None.
@@ -66,17 +67,33 @@ def handle_error(message, exception=None, exit_program=True):
     if exit_program:
         exit(1)
 
+
 # ------------------------------------------------------------------------------
 # Parse Arguments
 # ------------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, choices=["build", "remove", "test", "tag", "untag", "push"], required=True, help="Action to perform on Docker images.")
-    parser.add_argument("--tag", type=str, help="Tag for the images (or tag to remove).")
-    parser.add_argument("--registry", type=str, help="Registry prefix (required for push).")
-    parser.add_argument("--old-tag", type=str, help="Old tag (required for mode 'tag').")
-    parser.add_argument("--new-tag", type=str, help="New tag (required for mode 'tag').")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["build", "remove", "test", "tag", "untag", "push"],
+        required=True,
+        help="Action to perform on Docker images.",
+    )
+    parser.add_argument(
+        "--tag", type=str, help="Tag for the images (or tag to remove)."
+    )
+    parser.add_argument(
+        "--registry", type=str, help="Registry prefix (required for push)."
+    )
+    parser.add_argument(
+        "--old-tag", type=str, help="Old tag (required for mode 'tag')."
+    )
+    parser.add_argument(
+        "--new-tag", type=str, help="New tag (required for mode 'tag')."
+    )
     return parser.parse_args()
+
 
 # ------------------------------------------------------------------------------
 # Load Configuration
@@ -88,6 +105,7 @@ def load_config(config_file):
     except (FileNotFoundError, json.JSONDecodeError) as e:
         handle_error("Configuration error", exception=e)
 
+
 # ------------------------------------------------------------------------------
 # Path Handling
 # ------------------------------------------------------------------------------
@@ -97,6 +115,7 @@ def get_context_path(root_dir, image_path):
     if not resolved_path.exists():
         handle_error(f"Context path does not exist: {resolved_path}")
     return resolved_path
+
 
 # ------------------------------------------------------------------------------
 # Docker Operations
@@ -115,7 +134,9 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
     except (BuildError, APIError) as e:
         handle_error(f"Failed to build {full_tag}", exception=e)
 
+
 # Similar updates for tag_image, untag_image, push_images, test_images, and other functions.
+
 
 # ------------------------------------------------------------------------------
 # Main Handlers for Each Mode
@@ -127,12 +148,13 @@ def handle_build(client, config, tag, root_dir):
     base_image_def = config["images"][0]
     dependent_images = config["images"][1:]
 
-    print(f"[INFO] Building base image...")
+    print("[INFO] Building base image...")
     build_image(client, base_image_def, tag, root_dir)
 
-    print(f"[INFO] Building dependent images...")
+    print("[INFO] Building dependent images...")
     for img in dependent_images:
         build_image(client, img, tag, root_dir, base_image=base_image_def["name"])
+
 
 # ------------------------------------------------------------------------------
 # Main
@@ -161,6 +183,7 @@ def main():
             handle_error("Unsupported mode.")
     except Exception as e:
         handle_error("An unexpected error occurred", exception=e)
+
 
 if __name__ == "__main__":
     main()

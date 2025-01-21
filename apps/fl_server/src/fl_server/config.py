@@ -1,11 +1,11 @@
 import os
 
-MLFLOW_URL = os.getenv("MLFLOW_URL")
+MLFLOW_URL: str = os.environ["MLFLOW_URL"]
 
-RABBIT_USERNAME = os.getenv("RABBIT_USERNAME")
-RABBIT_PASSWORD = os.getenv("RABBIT_PASSWORD")
-RABBIT_HOST = os.getenv("RABBIT_HOST")
-RABBIT_PORT = os.getenv("RABBIT_PORT", "5672")
+RABBIT_USERNAME: str = os.environ["RABBIT_USERNAME"]
+RABBIT_PASSWORD: str = os.environ["RABBIT_PASSWORD"]
+RABBIT_HOST: str = os.environ["RABBIT_HOST"]
+RABBIT_PORT: str = os.getenv("RABBIT_PORT", "5672")
 
 global global_vars
 global_vars = {

@@ -8,6 +8,9 @@ authors = [
 readme = "README.md"
 # package-mode = false
 version = "0.0.0"
+packages = [
+    { include = "restapi", from = "src"}
+]
 
 [tool.poetry.dependencies]
 python = "^3.11.0"

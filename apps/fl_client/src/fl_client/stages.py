@@ -1,3 +1,4 @@
+from typing import Any
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
 from mlflow.models.model import ModelInfo
@@ -87,10 +88,10 @@ def set_model_parameters(parameters: ParametersRecord, global_vars: dict) -> Non
 def upload_model(
     latest_parameters: ParametersRecord,
     global_vars: dict,
-) -> ModelInfo:
+) -> dict[str, Any]:
     local_learner = global_vars["local_learner"]
     set_model_parameters(latest_parameters, global_vars)
-    model_info = mlflow_client.upload_final_state(local_learner)
+    model_info: dict[str, Any] = mlflow_client.upload_final_state(local_learner)
     return model_info
 
 
