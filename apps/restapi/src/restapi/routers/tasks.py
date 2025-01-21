@@ -60,9 +60,20 @@ async def cancel_task(task_id: int) -> Task | Response:
         return task
 
 
+@router.delete("/delete/{task_id}")
+async def delete_task(task_id: int) -> Response:
+    with Session(engine) as session:
+        task = session.get(Task, task_id)
+        if not task:
+            return JSONResponse(status_code=404, content="Task not found")
+        session.delete(task)
+        session.commit()
+        return JSONResponse(f"Task {task_id} deleted")
+
+
 @router.delete("/")
 async def delete_all_tasks() -> Response:
     with Session(engine) as session:
         session.exec(delete(Task))  # type: ignore[call-overload]
         session.commit()
-        return JSONResponse(status_code=200, content="All tasks deleted")
+        return JSONResponse("All tasks deleted")

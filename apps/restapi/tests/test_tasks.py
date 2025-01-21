@@ -76,6 +76,17 @@ def test_get_tasks_all(session, task_attrs):
     assert response.json()[0] == task_view.model_dump()
 
 
+def test_delete_one_task(session, task_attrs):
+    task = Task.model_validate(task_attrs)
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+
+    response = client.delete(f"/tasks/delete/{task.id}")
+    assert response.status_code == 200
+    tasks = session.exec(select(Task)).all()
+    assert len(tasks) == 0
+
 def test_delete_tasks(session, task_attrs):
     task = Task.model_validate(task_attrs)
     session.add(task)
