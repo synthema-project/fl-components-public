@@ -61,14 +61,14 @@ def test_create_task(session, task_attrs, rabbitmq):
     )
 
 
-def test_get_tasks_all(session, task_attrs):
+def test_get_all_tasks(session, task_attrs):
     task = Task.model_validate(task_attrs)
     session.add(task)
     session.commit()
     session.refresh(task)
 
     task_view = task.model_copy()
-    task_view.created_at = task_view.created_at.isoformat()
+    task_view.created_at = task.created_at.isoformat()  # type: ignore
 
     response = client.get("/tasks/")
     assert response.status_code == 200
@@ -82,12 +82,13 @@ def test_delete_one_task(session, task_attrs):
     session.commit()
     session.refresh(task)
 
-    response = client.delete(f"/tasks/delete/{task.id}")
+    response = client.delete(f"/tasks/{task.id}")
     assert response.status_code == 200
     tasks = session.exec(select(Task)).all()
     assert len(tasks) == 0
 
-def test_delete_tasks(session, task_attrs):
+
+def test_delete_all_tasks(session, task_attrs):
     task = Task.model_validate(task_attrs)
     session.add(task)
     session.commit()

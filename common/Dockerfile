@@ -1,5 +1,5 @@
 # Building env
-FROM python:3.11-slim-buster
+FROM python:3.11-slim
 
 ENV PYTHOPATH="${PYTHOPATH}:/common"
 COPY interfaces/ /common/interfaces/

@@ -1,7 +1,6 @@
 from typing import Any
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
-from mlflow.models.model import ModelInfo
 
 from fl_client.config import DATA_PATH
 

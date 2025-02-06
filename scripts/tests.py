@@ -3,6 +3,7 @@ import subprocess
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 
 def handle_error(message, exception=None, exit_program=True):
@@ -53,7 +54,7 @@ def run_command(command, description, project=None):
         )
 
 
-def load_docker_config():
+def load_docker_config() -> Any:
     """
     Load the Docker configuration file relative to the script directory.
     Returns:
