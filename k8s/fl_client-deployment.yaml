@@ -31,7 +31,7 @@ spec:
           value: "test_node"
         - name: MLFLOW_URL
           value: "http://experiment-model-registry-service"
-        - name: DATA_PATH
+        - name: DATA_PATH_AML
           value: "/common/fl_models/AML_public/AML_preprocessed.csv"
         resources:
           limits:

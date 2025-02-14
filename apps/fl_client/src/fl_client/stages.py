@@ -4,6 +4,7 @@ from flwr.common import MetricsRecord, ParametersRecord
 from mlflow.models.model import ModelInfo
 
 from fl_client.config import DATA_PATH
+from fl_client.config import DATA_PATH_AML
 
 from interfaces import mlflow_client
 
@@ -28,10 +29,14 @@ def set_run_config(
 
 
 def load_data(use_case: str, global_vars: dict) -> None:
-    if use_case != "iris":
+    if use_case != "iris" or use_case != "AML":
         raise NotImplementedError(f"Unknown use case: {use_case}")
+    if use_case == "iris":
+        global_vars["data"] = pd.read_csv(DATA_PATH)
+    if use_case == "AML":
+        global_vars["data"] = pd.read_csv(DATA_PATH_AML)
     global_vars["use_case"] = use_case
-    global_vars["data"] = pd.read_csv(DATA_PATH)
+
 
 
 def prepare_data(global_vars: dict) -> None:
