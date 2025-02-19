@@ -1,3 +1,4 @@
 mlflow
 requests
 flwr
+model-store-interface[edge]

@@ -1,86 +1,101 @@
-# import pytest
-# from unittest.mock import patch, Mock
-
-# import pika
-
-# from interfaces import rabbitmq_client
-
-
-# def test_configure_rabbitmq_client():
-#     with patch(
-#         "interfaces.rabbitmq_client.pika.BlockingConnection"
-#     ) as mock_blocking_connection:
-#         mock_connection = Mock()
-#         mock_channel = Mock()
-#         mock_blocking_connection.return_value = mock_connection
-#         mock_connection.channel.return_value = mock_channel
-
-#         rabbitmq_client.configure(
-#             user="guest",
-#             password="guest",
-#             host="localhost",
-#             task_dispatch_queue="fml-engine",
-#         )
-
-#         mock_blocking_connection.assert_called_once_with(
-#             pika.ConnectionParameters(
-#                 host="localhost", credentials=pika.PlainCredentials("guest", "guest")
-#             )
-#         )
-#         mock_connection.channel.assert_called_once()
-#         mock_channel.queue_declare.assert_called_once_with(
-#             queue="fml-engine", durable=True
-#         )
-
-#         assert rabbitmq_client._is_configured
-#         assert rabbitmq_client._task_dispatch_queue == "fml-engine"
+import asyncio
+from typing import AsyncGenerator
+import uuid
+import pytest
+import pytest_asyncio
+from testcontainers.rabbitmq import RabbitMqContainer
+from interfaces.rabbitmq_client import setup_rabbitmq, AsyncRabbitMQClient
 
 
-# def test_ensure_configured():
-#     with pytest.raises(RuntimeError):
-#         rabbitmq_client.publish_message("test")
-
-#     rabbitmq_client._is_configured.value = True
-#     rabbitmq_client._channel = Mock()
-
-#     try:
-#         rabbitmq_client.publish_message("test")
-#     except RuntimeError:
-#         pytest.fail("publish_message raised RuntimeError unexpectedly!")
+@pytest.fixture(scope="session")
+def rabbitmq_container():
+    """
+    This fixture starts a RabbitMQ container for the duration of the test session.
+    The container is automatically torn down after the tests complete.
+    """
+    with RabbitMqContainer("rabbitmq:3-management") as container:
+        # Optionally, you can add waiting logic here to ensure RabbitMQ is fully ready.
+        yield container
 
 
-# @patch("interfaces.rabbitmq_client._channel")
-# def test_publish_message(mock_channel):
-#     rabbitmq_client._is_configured.value = True
-#     rabbitmq_client._task_dispatch_queue = "fml-engine"
+@pytest_asyncio.fixture
+async def rabbitmq_client(
+    rabbitmq_container,
+) -> AsyncGenerator[AsyncRabbitMQClient, None]:
+    """
+    This fixture initializes the RabbitMQ client using the container's connection details.
+    """
+    host = rabbitmq_container.get_container_host_ip()
+    port = int(rabbitmq_container.get_exposed_port(5672))
+    # Testcontainers uses default guest/guest credentials.
+    topic = f"test_topic_{uuid.uuid4()}"
+    client = setup_rabbitmq(
+        user="guest",
+        password="guest",
+        host=host,
+        port=port,
+        heartbeat=60,
+        topic=topic,
+        declare=True,
+        exchange="fl-test",
+    )
+    await client._connect()
+    yield client
+    await client._close_connection()
 
-#     rabbitmq_client.publish_message("Hello, RabbitMQ!")
 
-#     mock_channel.basic_publish.assert_called_once_with(
-#         exchange="", routing_key="fml-engine", body="Hello, RabbitMQ!"
-#     )
+@pytest.mark.asyncio
+async def test_publish_and_consume(rabbitmq_client: AsyncRabbitMQClient):
+    """
+    This test verifies that a published message is eventually consumed.
+    """
+    messages = []
+
+    async def callback(message: str):
+        messages.append(message)
+
+    # Start the consumer in a background task.
+    consumer_task = asyncio.create_task(rabbitmq_client.listen_forever(callback))
+
+    test_message = "hello world from container"
+    await rabbitmq_client.publish_message(test_message)
+
+    # Wait a short time for the message to be processed.
+    await asyncio.sleep(1)
+
+    assert test_message in messages
+
+    consumer_task.cancel()
+    try:
+        await consumer_task
+    except asyncio.CancelledError:
+        pass
 
 
-# @patch("interfaces.rabbitmq_client._channel")
-# def test_listen(mock_channel):
-#     rabbitmq_client._is_configured.value = True
-#     rabbitmq_client._task_dispatch_queue = "fml-engine"
+@pytest.mark.asyncio
+async def test_reconnect_publish(rabbitmq_client: AsyncRabbitMQClient):
+    """
+    This test simulates a connection loss and then verifies that publishing still works.
+    """
+    # Simulate connection loss.
+    await rabbitmq_client._close_connection()
 
-#     callback = Mock()
-#     rabbitmq_client.listen(callback)
+    test_message = "reconnect test from container"
+    # The publish_message method should automatically reconnect and send the message.
+    await rabbitmq_client.publish_message(test_message)
 
-#     mock_channel.basic_consume.assert_called_once_with(
-#         queue="fml-engine", on_message_callback=callback, auto_ack=True
-#     )
-#     mock_channel.start_consuming.assert_called_once()
+    messages = []
 
+    async def callback(message: str):
+        messages.append(message)
 
-# @patch("interfaces.rabbitmq_client._connection")
-# @patch("interfaces.rabbitmq_client._channel")
-# def test_close_connection(mock_channel, mock_connection):
-#     rabbitmq_client._is_configured.value = True
+    consumer_task = asyncio.create_task(rabbitmq_client.listen_forever(callback))
+    await asyncio.sleep(1)
 
-#     rabbitmq_client._close_connection()
+    assert test_message in messages
 
-#     mock_channel.close.assert_called_once()
-#     mock_connection.close.assert_called_once()
+    consumer_task.cancel()
+    try:
+        await consumer_task
+    except asyncio.CancelledError:
+        pass

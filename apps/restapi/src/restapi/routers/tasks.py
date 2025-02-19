@@ -1,79 +1,105 @@
 from typing import Sequence
-
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Response, Depends
 from fastapi.responses import JSONResponse
-from sqlmodel import Session, select, delete
+from sqlmodel import select, delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from restapi.db import engine
+from restapi.db import get_session
 from restapi import config
+from interfaces.rabbitmq_client import AsyncRabbitMQClient
+from schemas.task import TaskCreate, TaskRead, TaskStatus
 
-from interfaces.rabbitmq_client import RabbitMQClient
-from schemas.task import TaskCreate, TaskRead, Task
+router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=None)
+
+async def get_rabbitmqs() -> dict[str, AsyncRabbitMQClient]:
+    """Dependency to fetch RabbitMQ dispatch client"""
+    rabbitmq_dispatch = config.obj.get("rabbitmq_dispatch")
+    if not isinstance(rabbitmq_dispatch, AsyncRabbitMQClient):
+        raise RuntimeError("RabbitMQ dispatch client not found")
+    rabbitmq_status = config.obj.get("rabbitmq_dispatch")
+    if not isinstance(rabbitmq_status, AsyncRabbitMQClient):
+        raise RuntimeError("RabbitMQ dispatch client not found")
+    return {"status": rabbitmq_status, "dispatch": rabbitmq_dispatch}
 
 
 @router.get("/", response_model=list[TaskRead])
-async def get_tasks_all() -> Sequence[Task]:
-    with Session(engine) as session:
-        tasks = session.exec(select(Task)).all()
-        return tasks
+async def get_tasks_all(
+    session: AsyncSession = Depends(get_session),
+) -> Sequence[TaskRead]:
+    result = await session.execute(select(TaskRead))
+    return result.scalars().all()
 
 
 @router.get("/{task_id}", response_model=TaskRead)
-async def get_task_by_id(task_id: int) -> JSONResponse | Task:
-    with Session(engine) as session:
-        task = session.get(Task, task_id)
-        if not task:
-            return JSONResponse(status_code=404, content="Task not found")
-        return task
+async def get_task_by_id(
+    task_id: int, session: AsyncSession = Depends(get_session)
+) -> JSONResponse | TaskRead:
+    task = await session.get(TaskRead, task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"message": "Task not found"})
+    return task
 
 
 @router.get("/user/{user_id}", response_model=list[TaskRead])
-async def get_tasks_by_user(user_id: str) -> Sequence[Task]:
-    with Session(engine) as session:
-        tasks = session.exec(select(Task).where(Task.user_id == user_id)).all()
-        return tasks
+async def get_tasks_by_user(
+    user_id: str, session: AsyncSession = Depends(get_session)
+) -> Sequence[TaskRead]:
+    result = await session.execute(select(TaskRead).where(TaskRead.user_id == user_id))
+    return result.scalars().all()
 
 
 @router.post("/", response_model=TaskRead)
-async def create_task(task: TaskCreate) -> Task:
-    with Session(engine) as session:
-        db_task = Task.model_validate(task)
-        session.add(db_task)
-        session.commit()
-        session.refresh(db_task)
-        rabbitmq: RabbitMQClient = config.obj["rabbitmq_dispatch"]
-        rabbitmq.publish_message(TaskRead.model_validate(db_task).model_dump_json())
-        return db_task
+async def create_task(
+    task: TaskCreate,
+    session: AsyncSession = Depends(get_session),
+    rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
+) -> TaskRead:
+    db_task = TaskRead.model_validate(task)
+    session.add(db_task)
+    await session.commit()
+    await session.refresh(db_task)
+
+    # Publish message to RabbitMQ
+    await rabbitmqs["dispatch"].publish_message(
+        TaskRead.model_validate(db_task).model_dump_json()
+    )
+
+    return db_task
 
 
 @router.put("/cancel/{task_id}", response_model=TaskRead)
-async def cancel_task(task_id: int) -> Task | Response:
-    with Session(engine) as session:
-        task = session.get(Task, task_id)
-        if not task:
-            return JSONResponse(status_code=404, content="Task not found")
-        task.change_status("cancelled")
-        session.commit()
-        session.refresh(task)
-        return task
+async def cancel_task(
+    task_id: int,
+    session: AsyncSession = Depends(get_session),
+    rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
+) -> TaskRead | Response:
+    task = await session.get(TaskRead, task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"message": "Task not found"})
+
+    task_status = TaskStatus(id=task.id, status=task.status)
+    await rabbitmqs["status"].publish_message(task_status.model_dump_json())
+    await session.commit()
+    await session.refresh(task)
+    return task
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: int) -> Response:
-    with Session(engine) as session:
-        task = session.get(Task, task_id)
-        if not task:
-            return JSONResponse(status_code=404, content="Task not found")
-        session.delete(task)
-        session.commit()
-        return JSONResponse(f"Task {task_id} deleted")
+async def delete_task(
+    task_id: int, session: AsyncSession = Depends(get_session)
+) -> Response:
+    task = await session.get(TaskRead, task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"message": "Task not found"})
+
+    await session.delete(task)
+    await session.commit()
+    return JSONResponse({"message": f"Task {task_id} deleted"})
 
 
 @router.delete("/")
-async def delete_all_tasks() -> Response:
-    with Session(engine) as session:
-        session.exec(delete(Task))  # type: ignore[call-overload]
-        session.commit()
-        return JSONResponse("All tasks deleted")
+async def delete_all_tasks(session: AsyncSession = Depends(get_session)) -> Response:
+    await session.execute(delete(TaskRead))
+    await session.commit()
+    return JSONResponse({"message": "All tasks deleted"})

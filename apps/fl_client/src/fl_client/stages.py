@@ -54,7 +54,7 @@ def train_model(
     current_global_iter: int,
 ) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
-    metrics = local_learner.train()
+    metrics = local_learner.train_round()
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Unexpected metrics type: {type(metrics)}")
     mlflow_client.log_metrics(metrics, current_global_iter)
