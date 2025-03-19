@@ -190,3 +190,6 @@ def clean_config(
         msg_group="clean_config",
         check_success=True,
     )
+
+## Require P2P established
+# server needs to notify the client to start establishing the P2P network

@@ -91,7 +91,7 @@ async def server_main(
 
     logger.info("Broadcasting parameters")
     requires.set_parameters(driver, filtered_node_ids, parameters)
-
+    
     logger.info("Starting training loop")
     await execute_training_loop(
         driver, filtered_node_ids, parameters, task.num_global_iterations

@@ -41,6 +41,11 @@ services:
     command: ["--insecure"]
 
   synthema-fl-client:
+    build: 
+      context: apps/fl_client
+      args:
+        BASE_IMAGE: fl-common
+        CURRENT_VERSION: latest
     image: synthema-fl-client:test
     container_name: synthema-fl-client
     command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
@@ -57,6 +62,11 @@ services:
           cpus: "1"
   
   synthema-fl-server:
+    build: 
+      context: apps/fl_server
+      args:
+        BASE_IMAGE: fl-common
+        CURRENT_VERSION: latest
     image: synthema-fl-server:test
     container_name: synthema-fl-server
     command: ["python", "-m", "src.fl_server.main", "--superlink", "flower-superlink:9091"]
@@ -78,32 +88,15 @@ services:
         limits:
           cpus: "1"
 
-  synthema-fl-status_listener:
-    image: synthema-fl-status_listener:test
-    container_name: synthema-fl-status_listener
-    environment:
-      - RABBIT_USERNAME=username
-      - RABBIT_PASSWORD=password
-      - RABBIT_HOST=rabbitmq
-      - RABBIT_PORT=5672
-      - RABBIT_QUEUE=status
-      - POSTGRES_USERNAME=username
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=postgres
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - DB_ECHO=true
-    depends_on:
-      synthema-fl-restapi:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-
   synthema-fl-restapi:
+    build: 
+      context: apps/restapi
+      args:
+        BASE_IMAGE: fl-common
+        CURRENT_VERSION: latest
     image: synthema-fl-restapi:test
     container_name: synthema-fl-restapi
+    # command: ["python", "-m", "src.restapi.main"]
     ports:
       - 8000:8000
     environment:
@@ -121,12 +114,12 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
-      interval: 30s
-      timeout: 30s
-      retries: 5
-      start_period: 1m
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+    #   interval: 30s
+    #   timeout: 30s
+    #   retries: 5
+    #   start_period: 1m
     deploy:
       resources:
         limits:

@@ -1,5 +1,5 @@
-ARG CURRENT_VERSION
-ARG BASE_IMAGE
+ARG CURRENT_VERSION=latest
+ARG BASE_IMAGE=fl-common
 
 FROM python:3.11-slim as builder
 

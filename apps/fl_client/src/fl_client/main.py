@@ -65,7 +65,8 @@ def query(msg: Message, ctx: Context) -> Message:
 
     elif mode == "clean_config":
         return clean_config_if(msg)
-
+    # elif mode=="P2P_connection":
+    #     ## P2P network connection
     else:
         raise NotImplementedError(f"Unknown mode: {mode}")
 
