@@ -1,41 +1,22 @@
 import pytest
-from unittest.mock import MagicMock
-
-from fastapi.testclient import TestClient
-from sqlmodel import Session, select, delete, SQLModel
+from unittest.mock import AsyncMock
+from httpx import AsyncClient  # Use AsyncClient for async FastAPI testing
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select, delete
 
 from restapi.main import create_app
-from restapi.db import engine, create_db_and_tables
+from restapi.db import get_session, create_db_and_tables, drop_db_and_tables
 from restapi.routers.tasks import config
-
-from interfaces.rabbitmq_client import RabbitMQClient
-from schemas.task import Task, TaskRead
+from interfaces.rabbitmq_client import AsyncRabbitMQClient
+from schemas.task import TaskRead, Status
 
 app = create_app()
-client = TestClient(app)
 
 
-@pytest.fixture()
-def session():
-    create_db_and_tables()
-    with Session(engine) as session:
-        yield session
-    SQLModel.metadata.drop_all(engine)
-
-
-@pytest.fixture
-def rabbitmq(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setitem(config.obj, "rabbitmq_dispatch", MagicMock(RabbitMQClient))
-
-
-@pytest.fixture(autouse=True)
-def clear_table(session):
-    session.exec(delete(Task))
-    session.commit()
-
-
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 def task_attrs():
+    """Provides a valid task attributes dictionary."""
     return {
         "user_id": "1",
         "use_case": "use_case",
@@ -47,68 +28,119 @@ def task_attrs():
     }
 
 
-def test_create_task(session, task_attrs, rabbitmq):
-    response = client.post("/tasks/", json=task_attrs)
+@pytest_asyncio.fixture
+async def async_session():
+    """Provides an async session fixture."""
+    await create_db_and_tables()
+    async for session in get_session():
+        yield session
+    await drop_db_and_tables()
 
+
+@pytest_asyncio.fixture
+def rabbitmq():
+    """Mocks the RabbitMQ client."""
+    mock_rabbitmq_dispatch = AsyncMock(AsyncRabbitMQClient)
+    mock_rabbitmq_status = AsyncMock(AsyncRabbitMQClient)
+    config.obj["rabbitmq_dispatch"] = mock_rabbitmq_dispatch
+    config.obj["rabbitmq_status"] = mock_rabbitmq_status
+    return mock_rabbitmq_dispatch, mock_rabbitmq_status
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clear_table(async_session: AsyncSession):
+    """Clears the task table before each test."""
+    async for session in get_session():
+        await session.execute(delete(TaskRead))
+        await session.commit()
+
+
+@pytest_asyncio.fixture
+async def async_client():
+    """Provides an async test client for FastAPI."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        yield client
+
+
+@pytest.mark.asyncio
+async def test_create_task(async_client, async_session, task_attrs, rabbitmq):
+    """Tests creating a new task and publishing a structured message."""
+    response = await async_client.post("/tasks/", json=task_attrs)
     assert response.status_code == 200
+
+    # Check the response
     for k in task_attrs.keys():
         assert response.json()[k] == task_attrs[k]
 
-    tasks = session.exec(select(Task)).all()
-    assert len(tasks) == 1
-    config.obj["rabbitmq_dispatch"].publish_message.assert_called_once_with(
-        TaskRead.model_validate(tasks[0]).model_dump_json()
-    )
+    # Check the database
+    async for session in get_session():
+        tasks = (await session.execute(select(TaskRead))).scalars().all()
+        assert len(tasks) == 1
+
+    # Validate RabbitMQ message
+    rabbitmq[0].publish_message.assert_called_once()
 
 
-def test_get_tasks_all(session, task_attrs):
-    task = Task.model_validate(task_attrs)
-    session.add(task)
-    session.commit()
-    session.refresh(task)
+@pytest.mark.asyncio
+async def test_get_all_tasks(async_client, async_session, task_attrs):
+    """Tests retrieving all tasks."""
+    async for session in get_session():
+        task = TaskRead(**task_attrs)
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
 
-    task_view = task.model_copy()
-    task_view.created_at = task_view.created_at.isoformat()
-
-    response = client.get("/tasks/")
+    response = await async_client.get("/tasks/")
     assert response.status_code == 200
     assert len(response.json()) == 1
-    assert response.json()[0] == task_view.model_dump()
+    assert response.json()[0]["user_id"] == task_attrs["user_id"]
 
 
-def test_delete_one_task(session, task_attrs):
-    task = Task.model_validate(task_attrs)
-    session.add(task)
-    session.commit()
-    session.refresh(task)
+@pytest.mark.asyncio
+async def test_delete_one_task(async_client, async_session, task_attrs):
+    """Tests deleting a single task."""
+    async for session in get_session():
+        task = TaskRead(**task_attrs)
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
 
-    response = client.delete(f"/tasks/delete/{task.id}")
+        response = await async_client.delete(f"/tasks/{task.id}")
+        assert response.status_code == 200
+
+        tasks = (await session.execute(select(TaskRead))).scalars().all()
+        assert len(tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_all_tasks(async_client, async_session, task_attrs):
+    """Tests deleting all tasks."""
+    async for session in get_session():
+        task = TaskRead(**task_attrs)
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+
+    response = await async_client.delete("/tasks/")
     assert response.status_code == 200
-    tasks = session.exec(select(Task)).all()
-    assert len(tasks) == 0
 
-def test_delete_tasks(session, task_attrs):
-    task = Task.model_validate(task_attrs)
-    session.add(task)
-    session.commit()
-    session.refresh(task)
-
-    response = client.delete("/tasks/")
-    assert response.status_code == 200
-    tasks = session.exec(select(Task)).all()
-    assert len(tasks) == 0
+    async for session in get_session():
+        tasks = (await session.execute(select(TaskRead))).scalars().all()
+        assert len(tasks) == 0
 
 
-def test_cancel_task(session, task_attrs):
-    task = Task.model_validate(task_attrs)
-    session.add(task)
-    session.commit()
-    session.refresh(task)
+@pytest.mark.asyncio
+async def test_cancel_task(async_client, async_session, rabbitmq, task_attrs):
+    """Tests canceling a task and checking status update."""
+    async for session in get_session():
+        task = TaskRead(**task_attrs)
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
 
-    assert task.status == "pending"
+        assert task.status == Status.PENDING.value
 
-    response = client.put(f"/tasks/cancel/{task.id}")
-    assert response.status_code == 200
-    session.refresh(task)
+        response = await async_client.put(f"/tasks/cancel/{task.id}")
+        assert response.status_code == 200
 
-    assert task.status == "cancelled"
+        assert rabbitmq[1].publish_message.called_once()

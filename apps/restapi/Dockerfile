@@ -1,7 +1,7 @@
 ARG CURRENT_VERSION
 ARG BASE_IMAGE
 
-FROM python:3.11-slim-buster as builder
+FROM python:3.11-slim as builder
 
 RUN pip install poetry
 
@@ -31,4 +31,4 @@ COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY src/ ./src
 COPY tests/ ./tests
 
-CMD ["python", "-m", "src.restapi.main"]
+CMD ["uvicorn", "src.restapi.main:app", "--host", "0.0.0.0", "--port", "8000"]

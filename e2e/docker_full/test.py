@@ -1,16 +1,13 @@
-import os
 import time
 
 import mlflow.runs
-
-os.environ["MLFLOW_URL"] = "http://mlflow"
-
 import mlflow
 import requests
 
-from fl_models.iris.fl_model import log_model
+from model_store_interface.mlflow_interface import submit_fl_model, FederatedModel
 
-log_model()
+model = FederatedModel(model_name="iris_model")
+submit_fl_model(model, "http://mlflow", "username", "password", "Default", "AML", False)
 
 response = requests.post(
     "http://synthema-fl-restapi:8000/tasks",
@@ -62,3 +59,5 @@ response2 = requests.get(f"http://synthema-fl-restapi:8000/tasks/{task_id}")
 if response2.json()["status"] != "success":
     print(f"Expected task status to be success, but got {response2.json()['status']}")
     exit(1)
+
+print("Execution succeeded")

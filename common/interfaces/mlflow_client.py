@@ -94,7 +94,10 @@ def create_parent_run(run_name: str, experiment_name: str) -> tuple[str, str]:
     Returns:
         tuple[str, str]: A tuple containing the run ID and experiment ID of the parent run.
     """
-    experiment_id = _mlflow_client.get_experiment_by_name(experiment_name).experiment_id
+    experiment = _mlflow_client.get_experiment_by_name(experiment_name)
+    if not experiment:
+        raise ValueError(f"Experiment {experiment_name} not found")
+    experiment_id = experiment.experiment_id
     run = _mlflow_client.create_run(experiment_id=experiment_id, run_name=run_name)
     return run.info.run_id, run.info.experiment_id
 
@@ -146,7 +149,7 @@ def set_current_config(
     """
     global _current_config, _mlflow_client
     model_mlflow_meta = _mlflow_client.get_model_version(
-        name=model_name, version=model_version
+        name=model_name, version=str(model_version)
     )
     _current_config.experiment_id = experiment_id
     _current_config.parent_run_id = parent_run_id
@@ -168,9 +171,9 @@ def clean_current_config() -> None:
     global _current_config, _configured
     # _current_config.clean()
     if _current_config.is_central_node:
-        _mlflow_client.update_run(_current_config.parent_run_id, "FINISHED")
+        _mlflow_client.update_run(str(_current_config.parent_run_id), "FINISHED")
     mlflow.end_run()
-    _mlflow_client.update_run(_current_config.child_run_id, "FINISHED")
+    _mlflow_client.update_run(str(_current_config.child_run_id), "FINISHED")
     _configured.value = False
 
 
@@ -183,9 +186,10 @@ def load_model() -> PyFuncModel:
     Returns:
         PyFuncModel: The loaded model.
     """
-    return _load_model(
+    model: PyFuncModel = _load_model(
         f"models:/{_current_config.model_name}/{_current_config.model_version}"
     )
+    return model
 
 
 @ensure_bool(_configured)
@@ -216,16 +220,16 @@ def upload_final_state(
 
     version = model_info.registered_model_version
     _mlflow_client.update_model_version(
-        name, version, _current_config.model_description
+        name, str(version), _current_config.model_description
     )
     _mlflow_client.set_model_version_tag(
         name,
-        model_info.registered_model_version,
+        str(model_info.registered_model_version),
         "use_case",
         _current_config.model_tags["use_case"],
     )
     _mlflow_client.set_model_version_tag(
-        name, model_info.registered_model_version, "trained", True
+        name, str(model_info.registered_model_version), "trained", True
     )
     return {
         "name": name,
@@ -264,5 +268,5 @@ def set_dataset_signature(node_name: str, path: str, run_id: str) -> None:
         run_id (str): The run ID under which the dataset is logged.
     """
     source = HTTPDatasetSource(f"{node_name}://{path}")
-    dataset = MetaDataset(source)
+    dataset = MetaDataset(source)  # type: ignore
     mlflow.log_input(dataset, "training")

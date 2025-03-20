@@ -10,14 +10,12 @@ from fl_client import stages
 from fl_client.config import DATA_PATH
 
 from fl_models.iris.fl_model import FLModel
-from interfaces.pytorch import (
-    pytorch_to_parameter_record,
-)
+from model_store_interface.mlflow_interface import FederatedModel
 
 
 @pytest.fixture(scope="session")
 def fl_model():
-    return FLModel()
+    return FederatedModel()
 
 
 @pytest.fixture(scope="session")
@@ -86,11 +84,11 @@ def test_upload_model(global_vars_dict):
     # Create the local learner
     global_vars = global_vars_dict
     local_learner = global_vars["local_learner"]
-    parameter_records = pytorch_to_parameter_record(local_learner)
+    parameters_record = local_learner.get_parameters()
     with patch(
         "fl_client.stages.mlflow_client.upload_final_state"
     ) as mock_upload_model:
-        stages.upload_model(parameter_records, global_vars)
+        stages.upload_model(parameters_record, global_vars)
 
     mock_upload_model.assert_called_once()
 
@@ -132,7 +130,7 @@ def test_set_run_config(mock_mlflow_client):
 
 def test_train_model_success(global_vars_dict):
     global_vars = global_vars_dict
-    with patch.object(global_vars["local_learner"], "train") as mock_train:
+    with patch.object(global_vars["local_learner"], "train_round") as mock_train:
         mock_train.return_value = MetricsRecord({"loss": 0.1})
         with patch("fl_client.stages.mlflow_client.log_metrics") as mock_log_metrics:
             metrics = stages.train_model(global_vars, 1)
@@ -145,7 +143,7 @@ def test_train_model_success(global_vars_dict):
 
 def test_train_model_error(global_vars_dict):
     global_vars = global_vars_dict
-    with patch.object(global_vars["local_learner"], "train") as mock_train:
+    with patch.object(global_vars["local_learner"], "train_round") as mock_train:
         mock_train.return_value = "error"
         with pytest.raises(TypeError):
             stages.train_model(global_vars, 1)

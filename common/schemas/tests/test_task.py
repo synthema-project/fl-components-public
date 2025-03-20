@@ -1,6 +1,6 @@
 import pytest
 
-from schemas.task import TaskRead, Status, Task
+from schemas.task import Status, TaskRead
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def task():
 def test_task_serde(task):
     js = task.model_dump_json()
 
-    new_task = TaskRead.from_json(js)
+    new_task = TaskRead.model_validate_json(js)
 
     new_task_dict = new_task.model_dump()
     task_dict = new_task.model_dump()
@@ -30,7 +30,7 @@ def test_task_serde(task):
 
 
 def test_task_change_status(task):
-    task_db = Task.model_validate(task)
+    task_db = TaskRead.model_validate(task)
 
     task_db.change_status("RUNNING")
     assert task_db.status == Status.RUNNING

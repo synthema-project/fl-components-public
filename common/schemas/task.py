@@ -1,9 +1,8 @@
 import enum
-from typing import Self
 from datetime import datetime
 
 from sqlmodel import SQLModel, Field, Column, Enum
-from pydantic_core import from_json
+from pydantic import BaseModel
 
 
 class Status(str, enum.Enum):
@@ -12,6 +11,11 @@ class Status(str, enum.Enum):
     SUCCESS = "success"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class TaskStatus(BaseModel):
+    id: int
+    status: Status
 
 
 class TaskBase(SQLModel):
@@ -25,8 +29,8 @@ class TaskBase(SQLModel):
     experiment_name: str = Field(nullable=False)
 
 
-class Task(TaskBase, table=True):
-    id: int | None = Field(default=None, primary_key=True)
+class TaskRead(TaskBase, table=True):
+    id: int = Field(default=None, primary_key=True, nullable=False)
     status: Status = Field(default=Status.PENDING, sa_column=Column(Enum(Status)))
     created_at: datetime = Field(default_factory=datetime.now, nullable=False)
 
@@ -36,13 +40,3 @@ class Task(TaskBase, table=True):
 
 class TaskCreate(TaskBase):
     pass
-
-
-class TaskRead(TaskBase):
-    id: int
-    status: str
-    created_at: datetime
-
-    @classmethod
-    def from_json(cls, json_str: str) -> Self:
-        return cls.model_validate(from_json(json_str))

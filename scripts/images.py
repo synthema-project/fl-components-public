@@ -7,7 +7,7 @@ Usage:
 
 Modes:
     build
-        Build Docker images defined in docker_config.json. 
+        Build Docker images defined in docker_config.json.
         The first image is treated as the base image, which will be built first.
         Options:
             --tag <tag>            Required. Tag for the images (e.g., 1.0.0).
@@ -48,17 +48,33 @@ from pathlib import Path
 import docker
 from docker.errors import ImageNotFound, APIError, BuildError
 
+
 # ------------------------------------------------------------------------------
 # Parse Arguments
 # ------------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, choices=["build", "remove", "test", "tag", "untag", "push"], required=True, help="Action to perform on Docker images.")
-    parser.add_argument("--tag", type=str, help="Tag for the images (or tag to remove).")
-    parser.add_argument("--registry", type=str, help="Registry prefix (required for push).")
-    parser.add_argument("--old-tag", type=str, help="Old tag (required for mode 'tag').")
-    parser.add_argument("--new-tag", type=str, help="New tag (required for mode 'tag').")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["build", "remove", "test", "tag", "untag", "push"],
+        required=True,
+        help="Action to perform on Docker images.",
+    )
+    parser.add_argument(
+        "--tag", type=str, help="Tag for the images (or tag to remove)."
+    )
+    parser.add_argument(
+        "--registry", type=str, help="Registry prefix (required for push)."
+    )
+    parser.add_argument(
+        "--old-tag", type=str, help="Old tag (required for mode 'tag')."
+    )
+    parser.add_argument(
+        "--new-tag", type=str, help="New tag (required for mode 'tag')."
+    )
     return parser.parse_args()
+
 
 # ------------------------------------------------------------------------------
 # Load Configuration
@@ -71,6 +87,7 @@ def load_config(config_file):
         print(f"[ERROR] Configuration error: {e}")
         exit(1)
 
+
 # ------------------------------------------------------------------------------
 # Path Handling
 # ------------------------------------------------------------------------------
@@ -81,6 +98,7 @@ def get_context_path(root_dir, image_path):
         print(f"[ERROR] Context path does not exist: {resolved_path}")
         exit(1)
     return resolved_path
+
 
 # ------------------------------------------------------------------------------
 # Docker Operations
@@ -101,6 +119,7 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
         print(f"[ERROR] Failed to build {full_tag}: {e}")
         return False
 
+
 def tag_image(client, config, old_tag, new_tag):
     """Tag images with a new tag."""
     if not old_tag or not new_tag:
@@ -117,6 +136,7 @@ def tag_image(client, config, old_tag, new_tag):
         except APIError as e:
             print(f"[ERROR] Failed to tag image {old}: {e}")
 
+
 def untag_image(client, config, tag):
     """Remove a specific tag from images."""
     if not tag:
@@ -129,12 +149,13 @@ def untag_image(client, config, tag):
         except APIError as e:
             print(f"[ERROR] Failed to remove tag {tag}: {e}")
 
+
 def push_images(client: docker.DockerClient, config, tag, registry):
     """Push images to a registry."""
     if not tag or not registry:
         print("[ERROR] --tag and --registry are required for pushing.")
         return
-    
+
     new_imgs = []
 
     for img in config["images"]:
@@ -150,16 +171,19 @@ def push_images(client: docker.DockerClient, config, tag, registry):
             print(f"[INFO] Tagged {local_tag} as {full_tag}")
 
             # Push the image to the registry
-            for line in client.images.push(repository=full_tag, stream=True, decode=True):
+            for line in client.images.push(
+                repository=full_tag, stream=True, decode=True
+            ):
                 if "error" in line:
                     print(f"[ERROR] Push error: {line['error']}")
                     return
-            
+
             print(f"[OK] Successfully pushed {full_tag}")
         except ImageNotFound:
             print(f"[ERROR] Local image not found: {local_tag}")
         except APIError as e:
             print(f"[ERROR] API error during push for {full_tag}: {e}")
+
 
 def test_images(client: docker.DockerClient, config, tag):
     """Run tests for Docker images that have 'test': true in the configuration."""
@@ -172,7 +196,7 @@ def test_images(client: docker.DockerClient, config, tag):
             full_tag = f"{img['name']}:{tag}"
             try:
                 # Ensure the image exists locally
-                local_image = client.images.get(full_tag)
+                client.images.get(full_tag)
 
                 print(f"[INFO] Running tests for image: {full_tag}")
                 client.containers.run(
@@ -181,7 +205,6 @@ def test_images(client: docker.DockerClient, config, tag):
                     remove=True,
                 )
 
-
                 print(f"[OK] Tests passed for image: {full_tag}")
             except ImageNotFound:
                 print(f"[ERROR] Local image not found for testing: {full_tag}")
@@ -189,6 +212,8 @@ def test_images(client: docker.DockerClient, config, tag):
                 print(f"[ERROR] API error during testing for {full_tag}: {e}")
             except Exception as e:
                 print(f"[ERROR] Unexpected error during testing for {full_tag}: {e}")
+
+
 # ------------------------------------------------------------------------------
 # Handlers for Each Mode
 # ------------------------------------------------------------------------------
@@ -200,14 +225,15 @@ def handle_build(client, config, tag, root_dir):
     base_image_def = config["images"][0]
     dependent_images = config["images"][1:]
 
-    print(f"[INFO] Building base image...")
+    print("[INFO] Building base image...")
     if not build_image(client, base_image_def, tag, root_dir):
         print("[ERROR] Base image build failed. Aborting.")
         return
 
-    print(f"[INFO] Building dependent images...")
+    print("[INFO] Building dependent images...")
     for img in dependent_images:
         build_image(client, img, tag, root_dir, base_image=base_image_def["name"])
+
 
 def handle_remove(client, config):
     """Remove all images listed in the configuration."""
@@ -220,6 +246,7 @@ def handle_remove(client, config):
                 print(f"[OK] Removed: {img.id}")
         except APIError as e:
             print(f"[ERROR] Failed to remove images: {e}")
+
 
 # ------------------------------------------------------------------------------
 # Main
@@ -245,6 +272,7 @@ def main():
         test_images(client, config, args.tag)
     else:
         print("[ERROR] Unsupported mode.")
+
 
 if __name__ == "__main__":
     main()

@@ -18,6 +18,12 @@ ruff = "^0.5"
 
 
 # Test
+
+[[tool.poetry.source]]
+name = "synthema"
+url = "https://pypi.synthema.rid-intrasoft.eu/simple/"
+priority = "supplemental"
+
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",

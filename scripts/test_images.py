@@ -71,7 +71,10 @@ def test_remove():
         assert returncode == 0, f"Remove failed: {stderr}"
         assert validate_output(
             stdout,
-            expected_phrases=["[INFO] Image not found, skipping:", "[OK] Removed image:"],
+            expected_phrases=[
+                "[INFO] Image not found, skipping:",
+                "[OK] Removed image:",
+            ],
         ), f"Unexpected output: {stdout}"
         print("[TEST PASSED] Remove functionality works correctly.")
     except AssertionError as e:

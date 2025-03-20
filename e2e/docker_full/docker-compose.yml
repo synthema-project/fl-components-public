@@ -78,10 +78,32 @@ services:
         limits:
           cpus: "1"
 
+  synthema-fl-status_listener:
+    image: synthema-fl-status_listener:test
+    container_name: synthema-fl-status_listener
+    environment:
+      - RABBIT_USERNAME=username
+      - RABBIT_PASSWORD=password
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_PORT=5672
+      - RABBIT_QUEUE=status
+      - POSTGRES_USERNAME=username
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - DB_ECHO=true
+    depends_on:
+      synthema-fl-restapi:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
   synthema-fl-restapi:
     image: synthema-fl-restapi:test
     container_name: synthema-fl-restapi
-    command: ["python", "-m", "src.restapi.main"]
     environment:
       - RABBIT_USERNAME=username
       - RABBIT_PASSWORD=password
@@ -117,6 +139,8 @@ services:
     command: ["python", "test.py"]
     depends_on:
       mlflow:
+        condition: service_started
+      synthema-fl-status_listener:
         condition: service_started
       synthema-fl-restapi:
         condition: service_healthy
