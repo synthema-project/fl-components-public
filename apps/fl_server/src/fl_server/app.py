@@ -66,19 +66,19 @@ async def execute_training_loop(
         requires.set_parameters(driver, node_ids, aggregated_parameters)
 
 
-async def server_main(
-    task: TaskRead, driver: Driver, context: Context, rabbitmq: AsyncRabbitMQClient
-) -> None:
+async def server_main(task: TaskRead, driver: Driver, context: Context,
+                      rabbitmq: AsyncRabbitMQClient) -> None:
     """Main execution flow for the Federated Learning task."""
     if not task.id or not task.use_case:
-        logger.error(
-            "Task is missing required fields", task_id=task.id, use_case=task.use_case
-        )
+        logger.error("Task is missing required fields",
+                     task_id=task.id,
+                     use_case=task.use_case)
         return
     logger.info("Task started", task_id=task.id)
 
     node_ids = driver.get_node_ids()
-    filtered_node_ids = requires.filter_clients(driver, node_ids, task.use_case)
+    filtered_node_ids = requires.filter_clients(driver, node_ids,
+                                                task.use_case)
 
     logger.info("Configuring MLflow")
     await configure_mlflow(task, driver, filtered_node_ids)
@@ -86,16 +86,20 @@ async def server_main(
     logger.info("Loading model and data")
     await load_model_and_data(task, driver, filtered_node_ids)
 
+    # call discover_peers_if
+    logger.info("Establishing P2P network")
+    requires.discover_peers(driver, filtered_node_ids)
+
     logger.info("Getting initial parameters")
-    parameters = requires.get_parameters_from_one_node(driver, filtered_node_ids)
+    parameters = requires.get_parameters_from_one_node(driver,
+                                                       filtered_node_ids)
 
     logger.info("Broadcasting parameters")
     requires.set_parameters(driver, filtered_node_ids, parameters)
-    
+
     logger.info("Starting training loop")
-    await execute_training_loop(
-        driver, filtered_node_ids, parameters, task.num_global_iterations
-    )
+    await execute_training_loop(driver, filtered_node_ids, parameters,
+                                task.num_global_iterations)
 
     logger.info("Uploading trained model")
     requires.upload_model(driver, filtered_node_ids, parameters)

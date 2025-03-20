@@ -13,6 +13,8 @@ from fl_client.interface import (
     set_run_config_if,
     train_model_if,
     upload_model_if,
+    get_peer_discovery_if,
+    connect_peers_if
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -25,6 +27,7 @@ global_vars = {
     "use_case": "iris",
     "node_name": NODE_NAME,
     "data_path": DATA_PATH,
+    "peers": None
 }
 
 setup_mlflow(MLFLOW_URL)
@@ -65,8 +68,11 @@ def query(msg: Message, ctx: Context) -> Message:
 
     elif mode == "clean_config":
         return clean_config_if(msg)
-    # elif mode=="P2P_connection":
-    #     ## P2P network connection
+    elif mode == "discover_peers":
+        return get_peer_discovery_if(msg, global_vars)
+    ## P2P network connection
+    elif mode == "connect_peers":
+        return connect_peers_if(msg, global_vars)
     else:
         raise NotImplementedError(f"Unknown mode: {mode}")
 

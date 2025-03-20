@@ -193,3 +193,15 @@ def clean_config(
 
 ## Require P2P established
 # server needs to notify the client to start establishing the P2P network
+def discover_peers(
+    driver: Driver,
+    node_ids: list[int]
+) -> None:
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_discover_peers_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="discover_peers",
+        check_success=True,
+    )

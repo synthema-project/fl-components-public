@@ -1,10 +1,13 @@
 from flwr.common import Message
-
+import threading
+import structlog
 from fl_client import stages
 from fl_client.utils import responses_utils
+from fl_client.utils import peer_discovery
 
 from interfaces import recordset
 
+logger = structlog.get_logger()
 
 def load_data_if(msg: Message, global_vars: dict) -> Message:
     use_case = recordset.read_load_data_recordset(msg.content)
@@ -74,3 +77,28 @@ def filter_clients_if(msg: Message, global_vars: dict) -> Message:
     if use_case == global_vars["use_case"]:
         return responses_utils.create_participate_response(msg, True)
     return responses_utils.create_participate_response(msg, False)
+
+
+def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
+    discovery_service = peer_discovery.PeerDiscovery(
+        client_id=msg.content.client_id,
+        grpc_port=msg.content.client_port,
+        min_peers=msg.content.min_peers,
+        max_discovery_time=msg.content.discovery_timeout)
+
+    # Start discovery in a separate thread
+    discovery_thread = threading.Thread(
+        target=discovery_service.start_discovery)
+    discovery_thread.start()
+    discovery_thread.join()
+    discovered_peers = discovery_service.get_peer_addresses()
+    logger.info(f"Discovered peers: {discovered_peers}")
+    stages.set_discovered_peers(discovered_peers, global_vars)
+    return responses_utils.create_discovery_response(msg, discovered_peers)
+
+def connect_peers_if(msg: Message, global_vars: dict) -> Message:
+    discovered_peers = global_vars["peers"]
+    if discovered_peers is None:
+        return responses_utils.create_error_response(msg, "No peers discovered")
+    stages.connect_peers(discovered_peers, global_vars)
+    return responses_utils.create_connect_peers_response(msg, discovered_peers)

@@ -162,3 +162,11 @@ def create_clean_config_recordset() -> RecordSet:
         }
     )
     return RecordSet(configs_records={"config": configsrecord})
+
+def create_discover_peers_recordset() -> RecordSet:
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "discover_peers",
+        }
+    )
+    return RecordSet(configs_records={"config": configsrecord})

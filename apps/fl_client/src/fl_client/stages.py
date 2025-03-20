@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, List
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
 
@@ -96,3 +96,10 @@ def upload_model(
 
 def clean_current_config() -> None:
     mlflow_client.clean_current_config()
+
+def set_discovered_peers(discovered_peers: List, global_vars: dict) -> dict[str, str]:
+    global_vars['discovered_peers'] = discovered_peers
+    return discovered_peers
+
+def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
+    
