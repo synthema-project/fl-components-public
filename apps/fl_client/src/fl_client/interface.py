@@ -4,8 +4,8 @@ import structlog
 from fl_client import stages
 from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
-
 from interfaces import recordset
+import numpy as np
 
 logger = structlog.get_logger()
 
@@ -75,16 +75,19 @@ def clean_config_if(msg: Message) -> Message:
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
     use_case = recordset.read_filter_clients_recordset(msg.content)
     if use_case == global_vars["use_case"]:
+        print("RETURN PARTICIPATE = TRUE")
         return responses_utils.create_participate_response(msg, True)
     return responses_utils.create_participate_response(msg, False)
 
 
 def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
+    config = recordset.read_discover_peers_recordset(msg.content)
+
     discovery_service = peer_discovery.PeerDiscovery(
-        client_id=msg.content.client_id,
-        grpc_port=msg.content.client_port,
-        min_peers=msg.content.min_peers,
-        max_discovery_time=msg.content.discovery_timeout)
+        client_id=global_vars["node_name"],
+        grpc_port=config['client_port'],
+        min_peers=config['min_peers'],
+        max_discovery_time=config['max_discovery_time'],)
 
     # Start discovery in a separate thread
     discovery_thread = threading.Thread(
@@ -92,13 +95,20 @@ def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     discovery_thread.start()
     discovery_thread.join()
     discovered_peers = discovery_service.get_peer_addresses()
-    logger.info(f"Discovered peers: {discovered_peers}")
+    logger.info(f"Discovered {len(discovered_peers)} peers: {discovered_peers}")
     stages.set_discovered_peers(discovered_peers, global_vars)
     return responses_utils.create_discovery_response(msg, discovered_peers)
 
 def connect_peers_if(msg: Message, global_vars: dict) -> Message:
     discovered_peers = global_vars["peers"]
-    if discovered_peers is None:
+    if discovered_peers is None or len(discovered_peers) == 0:
         return responses_utils.create_error_response(msg, "No peers discovered")
-    stages.connect_peers(discovered_peers, global_vars)
+    global_vars["peer_stubs"] = stages.connect_peers(discovered_peers, global_vars)
     return responses_utils.create_connect_peers_response(msg, discovered_peers)
+
+def start_P2P_server_if(msg: Message, global_vars: dict) -> Message:
+    config = recordset.read_start_P2P_server_recordset(msg.content)
+    stages.start_P2P_server(
+        global_vars['node_name'], config['port'], global_vars
+    )
+    return responses_utils.create_start_p2p_server_response(msg, msg.content.port)

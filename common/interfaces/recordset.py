@@ -133,6 +133,29 @@ def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
         "model_version": model_version,
     }
 
+def read_start_P2P_server_recordset(recordset: RecordSet) -> dict:
+    port = recordset.configs_records["config"]["port"]
+    if not isinstance(port, int):
+        raise TypeError(f"port must be an integer, received {type(port)}")
+    return {
+        "port": port,
+    }
+
+def read_discover_peers_recordset(recordset: RecordSet) -> dict:
+    min_peers = recordset.configs_records["config"]["min_peers"]
+    client_port = recordset.configs_records["config"]["client_port"]
+    max_discovery_time = recordset.configs_records["config"]["max_discovery_time"]
+    if not isinstance(min_peers, int):
+        raise TypeError(f"min_peers must be an integer, received {type(min_peers)}")
+    if not isinstance(client_port, int):
+        raise TypeError(f"client_port must be an integer, received {type(client_port)}")
+    if not isinstance(max_discovery_time, int):
+        raise TypeError(f"max_discovery_time must be an integer, received {type(max_discovery_time)}")
+    return {
+        "min_peers": min_peers,
+        "client_port": client_port,
+        "max_discovery_time": max_discovery_time
+    }
 
 def create_train_model_recordset(
     parametersrecord: ParametersRecord, current_global_iter: int
@@ -163,10 +186,33 @@ def create_clean_config_recordset() -> RecordSet:
     )
     return RecordSet(configs_records={"config": configsrecord})
 
-def create_discover_peers_recordset() -> RecordSet:
+
+def create_start_P2P_server_recordset(port: int) -> RecordSet:
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "start_P2P_server",
+            "port": port
+        }
+    )
+    return RecordSet(configs_records={"config": configsrecord})
+
+def create_discover_peers_recordset(node_ids: list[int], client_port: int, max_discovery_time: int) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
             "mode": "discover_peers",
+            "min_peers": len(node_ids),
+            "client_port": client_port,
+            "max_discovery_time": max_discovery_time
+        }
+    )
+    return RecordSet(configs_records={"config": configsrecord})
+
+def create_connect_peers_recordset(node_ids: list[int], peers: list[str]) -> RecordSet:
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "connect_peers",
+            "node_ids": node_ids,
+            "peers": peers
         }
     )
     return RecordSet(configs_records={"config": configsrecord})

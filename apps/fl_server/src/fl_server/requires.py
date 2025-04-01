@@ -192,16 +192,64 @@ def clean_config(
     )
 
 ## Require P2P established
+def start_P2P_server(driver: Driver,
+    node_ids: list[int],
+    port: int
+) -> None:
 # server needs to notify the client to start establishing the P2P network
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_start_P2P_server_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="start_P2P_server",
+        recordset_factory_args=(port),
+        check_success=True,
+    )
+
+    return [
+        msg.content.config.grpc_port
+        for msg in all_replies
+    ]
+
 def discover_peers(
     driver: Driver,
-    node_ids: list[int]
+    node_ids: list[int],
+    client_port: int,
+    max_discovery_time: int
 ) -> None:
-    execution_flow(
+    # returns list of peers discovered by each client node
+    all_replies = execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_discover_peers_recordset,
         msg_type=MessageType.QUERY,
         msg_group="discover_peers",
+        recordset_factory_args=(node_ids, client_port, max_discovery_time),
         check_success=True,
     )
+
+    return [
+        msg.content.config.peers
+        for msg in all_replies
+    ]
+
+def connect_peers(
+    driver: Driver,
+    node_ids: list[int],
+    peers: list[str]
+) -> None:
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_connect_peers_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="connect_peers",
+        recordset_factory_args=(node_ids, peers),
+        check_success=True,
+    )
+
+    return [
+        msg.content.config.peers
+        for msg in all_replies
+    ]

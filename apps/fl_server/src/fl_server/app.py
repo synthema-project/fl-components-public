@@ -85,10 +85,16 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
 
     logger.info("Loading model and data")
     await load_model_and_data(task, driver, filtered_node_ids)
+    port = config.P2P_PORT
+    logger.info("Starting P2P servers")
+    requires.start_P2P_server(driver, filtered_node_ids, port)
 
     # call discover_peers_if
+    logger.info("Discover peers")
+    requires.discover_peers(driver, filtered_node_ids, port)
+
     logger.info("Establishing P2P network")
-    requires.discover_peers(driver, filtered_node_ids)
+    requires.connect_peers(driver, filtered_node_ids)
 
     logger.info("Getting initial parameters")
     parameters = requires.get_parameters_from_one_node(driver,

@@ -40,21 +40,63 @@ services:
     container_name: flower-superlink
     command: ["--insecure"]
 
-  synthema-fl-client:
+  synthema-fl-client-1:
     build: 
       context: apps/fl_client
       args:
         BASE_IMAGE: fl-common
         CURRENT_VERSION: latest
     image: synthema-fl-client:test
-    container_name: synthema-fl-client
+    container_name: synthema-fl-client1
     command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
     depends_on:
       flower-superlink:
         condition: service_started
     environment:
       - MLFLOW_URL=http://mlflow
-      - NODE_NAME=test
+      - NODE_NAME=test1
+      - DATA_PATH=/common/fl_models/iris/data.csv
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
+  synthema-fl-client-2:
+    build: 
+      context: apps/fl_client
+      args:
+        BASE_IMAGE: fl-common
+        CURRENT_VERSION: latest
+    image: synthema-fl-client:test
+    container_name: synthema-fl-client2
+    command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
+    depends_on:
+      flower-superlink:
+        condition: service_started
+    environment:
+      - MLFLOW_URL=http://mlflow
+      - NODE_NAME=test2
+      - DATA_PATH=/common/fl_models/iris/data.csv
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+
+  synthema-fl-client-3:
+    build: 
+      context: apps/fl_client
+      args:
+        BASE_IMAGE: fl-common
+        CURRENT_VERSION: latest
+    image: synthema-fl-client:test
+    container_name: synthema-fl-client3
+    command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
+    depends_on:
+      flower-superlink:
+        condition: service_started
+    environment:
+      - MLFLOW_URL=http://mlflow
+      - NODE_NAME=test3
       - DATA_PATH=/common/fl_models/iris/data.csv
     deploy:
       resources:
@@ -73,7 +115,11 @@ services:
     depends_on:
       flower-superlink:
         condition: service_started
-      synthema-fl-client:
+      synthema-fl-client-1:
+        condition: service_started
+      synthema-fl-client-2:
+        condition: service_started
+      synthema-fl-client-3:
         condition: service_started
       rabbitmq:
         condition: service_healthy

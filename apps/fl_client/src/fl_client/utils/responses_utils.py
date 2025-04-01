@@ -79,3 +79,33 @@ def create_discovery_response(
         configs_records={"config": configsrecord},
     )
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+def create_connect_peers_response(
+    msg: Message, peers: list[str]
+) -> Message:
+    configsrecord = ConfigsRecord(
+        {
+            "success": True,
+            "message": "connected to peers",
+            "peers": peers
+        }
+    )
+    rs = RecordSet(
+        configs_records={"config": configsrecord},
+    )
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+def create_start_p2p_server_response(
+    msg: Message, grpc_port: int
+) -> Message:
+    configsrecord = ConfigsRecord(
+        {
+            "success": True,
+            "message": "started P2P server",
+            "grpc_port": grpc_port
+        }
+    )
+    rs = RecordSet(
+        configs_records={"config": configsrecord},
+    )
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)

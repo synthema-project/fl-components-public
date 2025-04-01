@@ -1,12 +1,15 @@
 from typing import Any, List
 import pandas as pd
+import grpc
 from flwr.common import MetricsRecord, ParametersRecord
-
+import structlog
 from fl_client.config import DATA_PATH
-
+import smpc_pb2
+import smpc_pb2_grpc
 from interfaces import mlflow_client
+from SMPCClient import SMPCClient
 
-
+logger = structlog.get_logger()
 def set_run_config(
     experiment_id: str,
     parent_run_id: str,
@@ -93,13 +96,20 @@ def upload_model(
     model_info: dict[str, Any] = mlflow_client.upload_final_state(local_learner)
     return model_info
 
-
 def clean_current_config() -> None:
     mlflow_client.clean_current_config()
+
+def start_P2P_server(client_id: int, port: int, global_vars: dict) -> None:
+    smpc_client = SMPCClient(client_id, port)
+    global_vars["smpc_client"] = smpc_client
+    return smpc_client
 
 def set_discovered_peers(discovered_peers: List, global_vars: dict) -> dict[str, str]:
     global_vars['discovered_peers'] = discovered_peers
     return discovered_peers
 
 def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
+    smpc_client = global_vars["smpc_client"]
+    peer_stubs = smpc_client.connect_to_peers(discovered_peers)
+    global_vars["peer_stubs"] = peer_stubs
     

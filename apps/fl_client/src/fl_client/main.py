@@ -1,7 +1,10 @@
 from flwr.client import ClientApp
 from flwr.common import Context, Message
-
+import structlog
+import numpy as np
 from fl_client.config import MLFLOW_URL, NODE_NAME, DATA_PATH
+
+logger = structlog.get_logger()
 from fl_client.interface import (
     clean_config_if,
     filter_clients_if,
@@ -14,7 +17,8 @@ from fl_client.interface import (
     train_model_if,
     upload_model_if,
     get_peer_discovery_if,
-    connect_peers_if
+    connect_peers_if,
+    start_P2P_server_if
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -27,7 +31,10 @@ global_vars = {
     "use_case": "iris",
     "node_name": NODE_NAME,
     "data_path": DATA_PATH,
-    "peers": None
+    "peers": None,
+    "peer_stubs": None,
+    "smpc_client": None,
+    "discovered_peers": None
 }
 
 setup_mlflow(MLFLOW_URL)
@@ -68,10 +75,14 @@ def query(msg: Message, ctx: Context) -> Message:
 
     elif mode == "clean_config":
         return clean_config_if(msg)
+    # start grpc server for all clients
+    elif mode == "start_P2P_server":
+        return start_P2P_server_if(msg, global_vars)
     elif mode == "discover_peers":
         return get_peer_discovery_if(msg, global_vars)
-    ## P2P network connection
+    # P2P network connection
     elif mode == "connect_peers":
+        # returns the peers and peer_stubs
         return connect_peers_if(msg, global_vars)
     else:
         raise NotImplementedError(f"Unknown mode: {mode}")
