@@ -99,7 +99,9 @@ def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_discovery_response(msg, discovered_peers)
 
 def connect_peers_if(msg: Message, global_vars: dict) -> Message:
-    discovered_peers = global_vars["peers"]
+    discovered_peers = global_vars["discovered_peers"]
+    logger.info("-- CLEINT DISCOVERED PEERS --")
+    logger.info(discovered_peers)
     if discovered_peers is None or len(discovered_peers) == 0:
         return responses_utils.create_error_response(msg, "No peers discovered")
     global_vars["peer_stubs"] = stages.connect_peers(discovered_peers, global_vars)

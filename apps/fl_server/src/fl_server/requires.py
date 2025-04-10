@@ -216,7 +216,7 @@ def discover_peers(
     driver: Driver,
     node_ids: list[int],
     client_port: int,
-    max_discovery_time: int
+    max_discovery_time: int = 60
 ) -> None:
     # returns list of peers discovered by each client node
     all_replies = execution_flow(
@@ -230,26 +230,28 @@ def discover_peers(
     )
 
     return [
-        msg.content.config.peers
+        msg.content.configs_records['config']['peers']
         for msg in all_replies
     ]
 
 def connect_peers(
     driver: Driver,
     node_ids: list[int],
-    peers: list[str]
+    peers: list[list[str]]
 ) -> None:
-    all_replies = execution_flow(
-        driver=driver,
-        node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_connect_peers_recordset,
-        msg_type=MessageType.QUERY,
-        msg_group="connect_peers",
-        recordset_factory_args=(node_ids, peers),
-        check_success=True,
-    )
+    all_replies = []
+    for i, node_id in enumerate(node_ids):
+        partial_replies = execution_flow(
+            driver=driver,
+            node_ids=[node_id],
+            recordset_factory=interfaces.recordset.create_connect_peers_recordset,
+            msg_type=MessageType.QUERY,
+            msg_group="connect_peers",
+            recordset_factory_args=([node_id], peers[i]),
+        )
+        all_replies.extend(partial_replies)
 
-    return [
-        msg.content.config.peers
-        for msg in all_replies
-    ]
+    logger.info("-----")
+    logger.info("received messages:", all_replies=all_replies)
+
+    return [msg.content.configs_records['config']['peers'] for msg in all_replies]

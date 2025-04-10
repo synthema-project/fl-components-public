@@ -208,7 +208,7 @@ def create_discover_peers_recordset(node_ids: list[int], client_port: int, max_d
     )
     return RecordSet(configs_records={"config": configsrecord})
 
-def create_connect_peers_recordset(node_ids: list[int], peers: list[str]) -> RecordSet:
+def create_connect_peers_recordset(node_ids: list[int], peers: list[list[str]]) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
             "mode": "connect_peers",

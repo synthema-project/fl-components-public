@@ -91,10 +91,10 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
 
     # call discover_peers_if
     logger.info("Discover peers")
-    requires.discover_peers(driver, filtered_node_ids, port)
+    discovered_peers = requires.discover_peers(driver, filtered_node_ids, port, max_discovery_time=60)
 
     logger.info("Establishing P2P network")
-    requires.connect_peers(driver, filtered_node_ids)
+    requires.connect_peers(driver, filtered_node_ids, discovered_peers)
 
     logger.info("Getting initial parameters")
     parameters = requires.get_parameters_from_one_node(driver,
