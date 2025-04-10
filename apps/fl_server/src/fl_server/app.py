@@ -44,6 +44,12 @@ async def load_model_and_data(
     requires.load_model(driver, node_ids, task.model_name, task.model_version)
     requires.prepare_data(driver, node_ids)
 
+async def set_dp_config(
+    task: TaskRead, driver: Driver, node_ids: list[int]
+) -> None:
+    stages.configure_dp(config.global_vars,task.dp_mode,task.noise_multiplier,task.clipping_norm, len(node_ids))
+    requires.set_dp_config(driver, node_ids, task.dp_mode,task.noise_multiplier,task.clipping_norm)
+
 
 async def execute_training_loop(
     driver: Driver,
@@ -75,7 +81,7 @@ async def server_main(
             "Task is missing required fields", task_id=task.id, use_case=task.use_case
         )
         return
-    logger.info("Task started", task_id=task.id)
+    logger.info("Task started", task_id=task.id) 
 
     node_ids = driver.get_node_ids()
     filtered_node_ids = requires.filter_clients(driver, node_ids, task.use_case)
@@ -85,6 +91,10 @@ async def server_main(
 
     logger.info("Loading model and data")
     await load_model_and_data(task, driver, filtered_node_ids)
+
+    if task.dp_mode:
+        logger.info(f"Configuring DP {task.dp_mode} with clipping norm {task.clipping_norm} and noise multiplier {task.noise_multiplier}")
+        await set_dp_config(task, driver, filtered_node_ids)
 
     logger.info("Getting initial parameters")
     parameters = requires.get_parameters_from_one_node(driver, filtered_node_ids)

@@ -83,6 +83,10 @@ def set_model_parameters(parameters: ParametersRecord, global_vars: dict) -> Non
     local_learner = global_vars["local_learner"]
     local_learner.set_parameters(parameters)
 
+def set_dp_config(dp_params:dict, global_vars:dict):
+    global_vars["dp_config"] = dp_params
+
+
 
 def upload_model(
     latest_parameters: ParametersRecord,

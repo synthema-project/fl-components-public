@@ -11,8 +11,10 @@ from fl_client.interface import (
     prepare_data_if,
     set_parameters_if,
     set_run_config_if,
+    train_model_fixed_clipping_if,
     train_model_if,
     upload_model_if,
+    set_dp_config_if
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -25,6 +27,8 @@ global_vars = {
     "use_case": "iris",
     "node_name": NODE_NAME,
     "data_path": DATA_PATH,
+    "dp_config": None,
+
 }
 
 setup_mlflow(MLFLOW_URL)
@@ -57,6 +61,9 @@ def query(msg: Message, ctx: Context) -> Message:
     elif mode == "set_run_config":
         return set_run_config_if(msg, global_vars)
 
+    elif mode == "set_dp_config":
+        return set_dp_config_if(msg, global_vars)
+
     elif mode == "prepare_data":
         return prepare_data_if(msg, global_vars)
 
@@ -73,7 +80,10 @@ def query(msg: Message, ctx: Context) -> Message:
 @app.train()
 def train(msg: Message, ctx: Context) -> Message:
     global global_vars
-    return train_model_if(msg, global_vars)
+    if global_vars["dp_config"]["dp_mode"] == "central_dp":
+        return train_model_fixed_clipping_if(msg, global_vars)
+    else:    
+        return train_model_if(msg, global_vars)
 
 
 @app.evaluate()

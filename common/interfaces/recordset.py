@@ -111,7 +111,6 @@ def create_set_run_cfg_recordset(
         configs_records={"config": configsrecord},
     )
 
-
 def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
     experiment_id = recordset.configs_records["config"]["experiment_id"]
     parent_run_id = recordset.configs_records["config"]["run_id"]
@@ -132,6 +131,40 @@ def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
         "model_name": model_name,
         "model_version": model_version,
     }
+
+def create_set_dp_cfg_recordset(
+    dp_mode: str, clipping_norm: int, noise_multiplier: int
+) -> RecordSet:
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "set_dp_config",
+            "dp_mode": dp_mode,
+            "clipping_norm": clipping_norm,
+            "noise_multiplier": noise_multiplier,
+        }
+    )
+    return RecordSet(
+        configs_records={"config": configsrecord},
+    )
+
+def read_set_dp_cfg_recordset(recordset: RecordSet) -> dict:
+    dp_mode = recordset.configs_records["config"]["dp_mode"]
+    clipping_norm = recordset.configs_records["config"]["clipping_norm"]
+    noise_multiplier = recordset.configs_records["config"]["noise_multiplier"]
+    if (
+        not isinstance(dp_mode, str)
+        or not isinstance(clipping_norm, int)
+        or not isinstance(noise_multiplier, int)
+    ):
+        raise TypeError(
+            "dp_mode must be a string and clipping_norm and model version must be integera"
+        )
+    return {
+        "dp_mode": dp_mode,
+        "clipping_norm": clipping_norm,
+        "noise_multiplier": noise_multiplier,
+    }
+
 
 
 def create_train_model_recordset(

@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlmodel import SQLModel, Field, Column, Enum
 from pydantic import BaseModel
+from typing import Optional
 
 
 class Status(str, enum.Enum):
@@ -27,7 +28,9 @@ class TaskBase(SQLModel):
     num_global_iterations: int = Field(nullable=False)
     run_name: str = Field(nullable=False)
     experiment_name: str = Field(nullable=False)
-
+    dp_mode: Optional[str] = Field(default=None)
+    noise_multiplier: Optional[int] = Field(default=None)
+    clipping_norm: Optional[int] = Field(default=None)
 
 class TaskRead(TaskBase, table=True):
     id: int = Field(default=None, primary_key=True, nullable=False)
