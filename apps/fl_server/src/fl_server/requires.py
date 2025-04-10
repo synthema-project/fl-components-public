@@ -1,6 +1,6 @@
 from random import choice
 from typing import Callable
-
+import structlog
 from flwr.common import (
     DEFAULT_TTL,
     MessageType,
@@ -14,7 +14,7 @@ from fl_server import stages
 from fl_server.utils import driver_utils, requires_utils
 
 import interfaces.recordset
-
+logger = structlog.get_logger()
 
 def execution_flow(
     driver: Driver,
@@ -203,12 +203,12 @@ def start_P2P_server(driver: Driver,
         recordset_factory=interfaces.recordset.create_start_P2P_server_recordset,
         msg_type=MessageType.QUERY,
         msg_group="start_P2P_server",
-        recordset_factory_args=(port),
+        recordset_factory_args=(node_ids, port),
         check_success=True,
     )
 
     return [
-        msg.content.config.grpc_port
+        msg.content.configs_records['config']['grpc_port']
         for msg in all_replies
     ]
 

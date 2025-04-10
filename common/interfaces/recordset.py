@@ -187,10 +187,11 @@ def create_clean_config_recordset() -> RecordSet:
     return RecordSet(configs_records={"config": configsrecord})
 
 
-def create_start_P2P_server_recordset(port: int) -> RecordSet:
+def create_start_P2P_server_recordset(node_ids: list[int], port: int) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
             "mode": "start_P2P_server",
+            "node_ids": node_ids,
             "port": port
         }
     )

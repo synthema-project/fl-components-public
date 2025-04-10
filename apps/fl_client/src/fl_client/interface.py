@@ -110,4 +110,5 @@ def start_P2P_server_if(msg: Message, global_vars: dict) -> Message:
     stages.start_P2P_server(
         global_vars['node_name'], config['port'], global_vars
     )
-    return responses_utils.create_start_p2p_server_response(msg, msg.content.port)
+
+    return responses_utils.create_start_p2p_server_response(msg, config['port'])
