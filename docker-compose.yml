@@ -48,7 +48,7 @@ services:
         CURRENT_VERSION: latest
     image: synthema-fl-client:test
     container_name: synthema-fl-client1
-    command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
+    command: ["flower-client-app", "--superlink", "flower-superlink:9092","--insecure", "src.fl_client.main:app"]
     depends_on:
       flower-superlink:
         condition: service_started
@@ -69,7 +69,7 @@ services:
         CURRENT_VERSION: latest
     image: synthema-fl-client:test
     container_name: synthema-fl-client2
-    command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
+    command: ["flower-client-app", "--superlink", "flower-superlink:9092","--insecure", "src.fl_client.main:app"]
     depends_on:
       flower-superlink:
         condition: service_started
@@ -90,7 +90,7 @@ services:
         CURRENT_VERSION: latest
     image: synthema-fl-client:test
     container_name: synthema-fl-client3
-    command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
+    command: ["flower-client-app", "--superlink", "flower-superlink:9092","--insecure", "src.fl_client.main:app"]
     depends_on:
       flower-superlink:
         condition: service_started

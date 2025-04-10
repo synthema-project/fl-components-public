@@ -1,11 +1,8 @@
 from typing import Any, List
 import pandas as pd
-import grpc
 from flwr.common import MetricsRecord, ParametersRecord
 import structlog
 from fl_client.config import DATA_PATH
-import smpc_pb2
-import smpc_pb2_grpc
 from interfaces import mlflow_client
 from SMPCClient import SMPCClient
 

@@ -5,7 +5,6 @@ from fl_client import stages
 from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
 from interfaces import recordset
-import numpy as np
 
 logger = structlog.get_logger()
 

@@ -1,7 +1,6 @@
 from flwr.client import ClientApp
 from flwr.common import Context, Message
 import structlog
-import numpy as np
 from fl_client.config import MLFLOW_URL, NODE_NAME, DATA_PATH
 
 logger = structlog.get_logger()
@@ -39,7 +38,6 @@ global_vars = {
 
 setup_mlflow(MLFLOW_URL)
 app = ClientApp()
-
 
 @app.query()
 def query(msg: Message, ctx: Context) -> Message:
