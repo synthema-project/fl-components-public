@@ -1,8 +1,8 @@
 import time
 import threading
 from concurrent import futures
-import smpc_pb2
-import smpc_pb2_grpc
+from fl_client import smpc_pb2
+from fl_client import smpc_pb2_grpc
 import grpc
 import structlog
 import numpy as np

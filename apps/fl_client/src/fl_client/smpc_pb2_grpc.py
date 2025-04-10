@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import smpc_pb2 as smpc__pb2
+import fl_client.smpc_pb2 as smpc__pb2
 
 
 class SMPCStub(object):

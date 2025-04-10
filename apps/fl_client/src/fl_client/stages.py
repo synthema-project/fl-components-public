@@ -4,7 +4,7 @@ from flwr.common import MetricsRecord, ParametersRecord
 import structlog
 from fl_client.config import DATA_PATH
 from interfaces import mlflow_client
-from SMPCClient import SMPCClient
+from fl_client.SMPCClient import SMPCClient
 
 logger = structlog.get_logger()
 def set_run_config(
