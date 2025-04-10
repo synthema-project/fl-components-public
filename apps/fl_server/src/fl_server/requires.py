@@ -251,7 +251,4 @@ def connect_peers(
         )
         all_replies.extend(partial_replies)
 
-    logger.info("-----")
-    logger.info("received messages:", all_replies=all_replies)
-
     return [msg.content.configs_records['config']['peers'] for msg in all_replies]
