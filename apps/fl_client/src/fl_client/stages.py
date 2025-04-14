@@ -1,10 +1,13 @@
-from typing import Any, List
+from typing import Any, List, Dict
+import numpy as np
+import grpc
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
 import structlog
 from fl_client.config import DATA_PATH
 from interfaces import mlflow_client
 from fl_client.SMPCClient import SMPCClient
+from fl_client import smpc_pb2
 
 logger = structlog.get_logger()
 def set_run_config(
@@ -111,4 +114,73 @@ def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
     smpc_client = global_vars["smpc_client"]
     peer_stubs = smpc_client.connect_to_peers(discovered_peers)
     global_vars["peer_stubs"] = peer_stubs
-    
+
+def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
+                         peer_stubs: Dict[str, any],
+                         client_id: str):
+    """
+    Sends secret shares to all peer clients.
+
+    Parameters:
+    secret_shares (Dict[str, List[np.ndarray]]): Dictionary mapping peer node names to lists of numpy array shares.
+    peer_stubs (Dict[str, gRPC Stub]): Dictionary mapping peer node names to gRPC stubs for communication.
+    client_id (str): The ID of the client sending the shares.
+    """
+    for peer_node_name, stub in peer_stubs.items():
+        shares = secret_shares.get(peer_node_name)
+        if shares is None:
+            logger.error(f"No shares found for peer {peer_node_name}")
+            continue
+        
+        share_protos = []
+        for idx, matrix in enumerate(shares):
+            flattened_data = matrix.flatten()
+            share_proto = smpc_pb2.Share(
+                name=f"param_{idx}",  # Add a simple name for tracking
+                data=flattened_data.astype(np.float32).tobytes(),
+                shape=list(matrix.shape)
+            )
+            share_protos.append(share_proto)
+        
+        request = smpc_pb2.SharesRequest(
+            client_id=client_id,
+            shares=share_protos
+        )
+        
+        try:
+            response = stub.SendShares(request)
+            if response.status == "ACK":
+                logger.info(f"Client {client_id} successfully sent shares to peer {peer_node_name}")
+            else:
+                logger.error(f"Unexpected response from peer {peer_node_name}: {response.status}")
+        except grpc.RpcError as e:
+            logger.error(f"Failed to send shares to peer {peer_node_name}: {e}")
+
+def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
+    try:
+        # Wait for all shares from other clients
+        expected_shares = len(smpc_client.peer_addresses)
+        if expected_shares > 0:
+            if not smpc_client.all_shares_received.wait(timeout=60):
+                raise TimeoutError(f"Not all shares received for client {smpc_client.client_id}")
+            print("-- ALL SHARES RECEIVED --")
+            # Combine local and received shares properly with client IDs
+            all_shares = {f"client_{i}": shares for i, shares in enumerate(
+                [local_shares] + list(smpc_client.received_shares.values())
+            )}
+            print("-- RECONSTRUCTING ALL SAHRES --")
+            # Now reconstruct properly
+            aggregated_shares = smpc_client.reconstruct_model_weights(all_shares)
+
+            # Reset for next round
+            smpc_client.all_shares_received.clear()
+            smpc_client.received_shares.clear()
+
+            return aggregated_shares, len(smpc_client.x_train), {}
+        else:
+            # Solo client case
+            return smpc_client.model.get_weights(), len(smpc_client.x_train), {}
+    except TimeoutError as e:
+        logger.error(f"Client {smpc_client.client_id} failed to receive all shares: {e}")
+        return None, 0, {}
+

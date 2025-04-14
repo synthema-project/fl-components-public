@@ -1,4 +1,5 @@
 import time
+from typing import Dict
 import threading
 from concurrent import futures
 from fl_client import smpc_pb2
@@ -30,7 +31,9 @@ class SMPCClient():
         self.client_id = client_id
         self.peer_addresses = []
         self.peer_stubs = {}
+        self.received_shares = {}
         self.all_peers_connected = threading.Event()
+        self.all_shares_received = threading.Event()
         self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         smpc_pb2_grpc.add_SMPCServicer_to_server(SMPCServicer(self), self.server)
         self.server.add_insecure_port(f"[::]:{port}")
@@ -66,3 +69,50 @@ class SMPCClient():
 
         logger.error(f"Client {self.client_id} could not establish connections to all peers after {max_retries} attempts.")
         return self.peer_stubs
+
+    def receive_shares(self, sending_client_id: str, shares: list):
+        """
+        Receives secret shares from a peer client.
+
+        Parameters:
+        sending_client_id (str): The ID of the client sending the shares.
+        shares (list of np.ndarray): List of secret shares received from the peer client.
+        """
+        logger.info(f"Client {self.client_id} received shares from client {sending_client_id}")
+
+        self.received_shares[sending_client_id] = shares
+
+        expected_shares = len(self.peer_addresses)  # How many clients we expect shares from
+        if expected_shares > 0 and len(self.received_shares) >= expected_shares:
+            logger.info(f"Client {self.client_id} received all shares")
+            self.all_shares_received.set()
+
+    def reconstruct_model_weights(self,
+        shares_grouped_by_client: Dict[str, Dict[str, np.ndarray]]
+    ) -> Dict[str, np.ndarray]:
+        """
+        Reconstructs model weights from secret shares provided by each client.
+
+        Parameters:
+        shares_grouped_by_client (Dict[str, Dict[str, np.ndarray]]):
+            A dictionary where the key is the sender's client ID (str) and the value 
+            is another dictionary mapping parameter names (str) to their share (np.ndarray).
+
+        Returns:
+        Dict[str, np.ndarray]: A dictionary mapping parameter names to the reconstructed weights.
+        """
+        if not shares_grouped_by_client:
+            raise ValueError("No shares provided for reconstruction.")
+        
+        # Get the list of parameter names from any client
+        param_keys = next(iter(shares_grouped_by_client.values())).keys()
+        
+        reconstructed_weights = {}
+        for param_key in param_keys:
+            # Sum the shares for each parameter key
+            summed_param = sum(
+                client_shares[param_key] for client_shares in shares_grouped_by_client.values()
+            )
+            reconstructed_weights[param_key] = summed_param
+
+        return reconstructed_weights

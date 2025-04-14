@@ -7,8 +7,9 @@ service SMPC {
 }
 
 message Share {
-    bytes data = 1;
-    repeated int32 shape = 2;
+    string name = 1;
+    bytes data = 2;
+    repeated int32 shape = 3;
 }
 
 message SharesRequest {

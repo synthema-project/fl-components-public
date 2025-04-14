@@ -52,8 +52,11 @@ def train_model_if(msg: Message, global_vars: dict) -> Message:
     print(local_shares)
     print("REMOTE SHARES")
     print(remote_shares)
-
     logger.info(deserialized_params)
+    print("-- SNEDING SHARES TO PEERS --")
+    stages.send_shares_to_peers(remote_shares, global_vars["peer_stubs"], global_vars["node_name"])
+    latest_parameters, _, _ = stages.reconstruct_shares(local_shares, global_vars['smpc_client'])
+    
     return responses_utils.create_train_response(msg, latest_parameters, metrics)
 
 
