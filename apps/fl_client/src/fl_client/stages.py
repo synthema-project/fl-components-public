@@ -54,7 +54,8 @@ def train_model(
     current_global_iter: int,
 ) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
-    metrics = local_learner.train_round()
+    # metrics = local_learner.train_round()
+    metrics = local_learner.train()
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Unexpected metrics type: {type(metrics)}")
     mlflow_client.log_metrics(metrics, current_global_iter)
@@ -101,8 +102,9 @@ def start_P2P_server(client_id: int, port: int, global_vars: dict) -> None:
     global_vars["smpc_client"] = smpc_client
     return smpc_client
 
-def set_discovered_peers(discovered_peers: List, global_vars: dict) -> dict[str, str]:
+def set_discovered_peers(discovered_peers: List, discovered_peers_ids: List[str], global_vars: dict) -> dict[str, str]:
     global_vars['discovered_peers'] = discovered_peers
+    global_vars['discovered_peers_ids'] = discovered_peers_ids
     return discovered_peers
 
 def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:

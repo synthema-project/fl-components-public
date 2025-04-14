@@ -161,6 +161,11 @@ class PeerDiscovery:
         self.discovery_complete.wait()
         return list(self.peers.values())
 
+    def get_peer_ids(self):
+        """Return the discovered peer IDs"""
+        self.discovery_complete.wait()
+        return list(self.peers.keys())
+
     def get_peer_count(self):
         """Return the number of discovered peers"""
         return len(self.peers)

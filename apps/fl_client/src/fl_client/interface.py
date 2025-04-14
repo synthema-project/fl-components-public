@@ -1,10 +1,11 @@
-from flwr.common import Message
+from flwr.common import Message, parameters_to_ndarrays, Parameters
 import threading
 import structlog
 from fl_client import stages
 from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
 from interfaces import recordset
+from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, split_model_parameters_to_shares
 
 logger = structlog.get_logger()
 
@@ -39,6 +40,20 @@ def train_model_if(msg: Message, global_vars: dict) -> Message:
     stages.set_model_parameters(latest_parameters, global_vars)
     metrics = stages.train_model(global_vars, current_global_iter)
     latest_parameters = stages.get_model_parameters(global_vars)
+    logger.info(latest_parameters)
+    logger.info("-- LATEST PARAMETERS ND ARRAYS--")
+    serialized_params = serialize_parameters(latest_parameters)
+    deserialized_params = deserialize_parameters(serialized_params)
+
+    all_node_names = list(global_vars["discovered_peers_ids"])
+    all_node_names.append(global_vars["node_name"])
+    local_shares, remote_shares = split_model_parameters_to_shares(deserialized_params, all_node_names, global_vars["node_name"])
+    print("LOCAL SHARES")
+    print(local_shares)
+    print("REMOTE SHARES")
+    print(remote_shares)
+
+    logger.info(deserialized_params)
     return responses_utils.create_train_response(msg, latest_parameters, metrics)
 
 
@@ -94,8 +109,9 @@ def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     discovery_thread.start()
     discovery_thread.join()
     discovered_peers = discovery_service.get_peer_addresses()
+    discovered_peers_ids = discovery_service.get_peer_ids()
     logger.info(f"Discovered {len(discovered_peers)} peers: {discovered_peers}")
-    stages.set_discovered_peers(discovered_peers, global_vars)
+    stages.set_discovered_peers(discovered_peers, discovered_peers_ids, global_vars)
     return responses_utils.create_discovery_response(msg, discovered_peers)
 
 def connect_peers_if(msg: Message, global_vars: dict) -> Message:

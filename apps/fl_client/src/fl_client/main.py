@@ -33,7 +33,8 @@ global_vars = {
     "peers": None,
     "peer_stubs": None,
     "smpc_client": None,
-    "discovered_peers": None
+    "discovered_peers": None,
+    "discovered_peers_ids": None
 }
 
 setup_mlflow(MLFLOW_URL)
