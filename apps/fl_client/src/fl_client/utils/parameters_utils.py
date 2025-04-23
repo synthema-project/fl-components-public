@@ -1,9 +1,50 @@
 from typing import Dict, List, Tuple
 import numpy as np
+import torch
 import logging
+from flwr.common import Parameters, ndarrays_to_parameters, ParametersRecord, Array
+from collections import OrderedDict
 import grpc
 
 logger = logging.getLogger(__name__)
+EMPTY_TENSOR_KEY = "_empty"
+def parameters_to_parametersrecord(
+    parameters: Parameters, keep_input: bool
+) -> ParametersRecord:
+    """Convert legacy Parameters into a single ParametersRecord.
+
+    Because there is no concept of names in the legacy Parameters, arbitrary keys will
+    be used when constructing the ParametersRecord. Similarly, the shape and data type
+    won't be recorded in the Array objects.
+
+    Parameters
+    ----------
+    parameters : Parameters
+        Parameters object to be represented as a ParametersRecord.
+    keep_input : bool
+        A boolean indicating whether parameters should be deleted from the input
+        Parameters object (i.e. a list of serialized NumPy arrays) immediately after
+        adding them to the record.
+    """
+    tensor_type = parameters.tensor_type
+
+    num_arrays = len(parameters.tensors)
+    ordered_dict = OrderedDict()
+    for idx in range(num_arrays):
+        if keep_input:
+            tensor = parameters.tensors[idx]
+        else:
+            tensor = parameters.tensors.pop(0)
+        ordered_dict[str(idx)] = Array(
+            data=tensor, dtype="", stype=tensor_type, shape=[]
+        )
+
+    if num_arrays == 0:
+        ordered_dict[EMPTY_TENSOR_KEY] = Array(
+            data=b"", dtype="", stype=tensor_type, shape=[]
+        )
+    return ParametersRecord(ordered_dict, keep_input=keep_input)
+
 def serialize_parameters(parameters):
     """
     Serialize parameters dict (already Array objects) into a dict of raw fields.
@@ -123,3 +164,28 @@ def split_model_parameters_to_shares(
     remote_shares = node_shares                    # Remaining shares for others
 
     return local_shares, remote_shares
+
+def state_dict_to_parameter_records(state_dict: Dict):
+    weights = state_dict.values()
+    flwr_parameters = ndarrays_to_parameters(weights)
+    parameter_records = parameters_to_parametersrecord(flwr_parameters, keep_input=True)
+    return parameter_records
+
+def numpy_dict_to_torch_state_dict(numpy_dict):
+    """
+    Convert a dictionary of NumPy arrays to a PyTorch state_dict
+    
+    Args:
+        numpy_dict: Dictionary with keys as parameter names and values as NumPy arrays
+        
+    Returns:
+        PyTorch state_dict compatible with torch.nn.Module.load_state_dict()
+    """
+    state_dict = {}
+
+    for key, numpy_array in numpy_dict.items():
+        # Convert NumPy array to PyTorch tensor
+        tensor = torch.from_numpy(numpy_array)
+        state_dict[key] = tensor
+
+    return state_dict

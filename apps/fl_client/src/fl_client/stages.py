@@ -114,6 +114,7 @@ def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
     smpc_client = global_vars["smpc_client"]
     peer_stubs = smpc_client.connect_to_peers(discovered_peers)
     global_vars["peer_stubs"] = peer_stubs
+    return peer_stubs
 
 def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
                          peer_stubs: Dict[str, any],
@@ -127,34 +128,43 @@ def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
     client_id (str): The ID of the client sending the shares.
     """
     for peer_node_name, stub in peer_stubs.items():
-        shares = secret_shares.get(peer_node_name)
+        node_names = list(secret_shares.keys())
+        shares = secret_shares.get(node_names[peer_node_name])
         if shares is None:
-            logger.error(f"No shares found for peer {peer_node_name}")
+            logger.error(f"No shares found for peer {node_names[peer_node_name]}")
             continue
-        
+
         share_protos = []
-        for idx, matrix in enumerate(shares):
+        # for idx, matrix in enumerate(shares):
+        #     flattened_data = matrix.flatten()
+        #     share_proto = smpc_pb2.Share(
+        #         name=f"param_{idx}",  # Add a simple name for tracking
+        #         data=flattened_data.astype(np.float32).tobytes(),
+        #         shape=list(matrix.shape)
+        #     )
+        #     share_protos.append(share_proto)
+        for name, matrix in shares.items():
             flattened_data = matrix.flatten()
             share_proto = smpc_pb2.Share(
-                name=f"param_{idx}",  # Add a simple name for tracking
+                name=name,  # Use the actual name like 'linear.weight'
                 data=flattened_data.astype(np.float32).tobytes(),
                 shape=list(matrix.shape)
             )
             share_protos.append(share_proto)
-        
+
         request = smpc_pb2.SharesRequest(
             client_id=client_id,
             shares=share_protos
         )
-        
+
         try:
             response = stub.SendShares(request)
             if response.status == "ACK":
-                logger.info(f"Client {client_id} successfully sent shares to peer {peer_node_name}")
+                logger.info(f"Client {client_id} successfully sent shares to peer {node_names[peer_node_name]}")
             else:
-                logger.error(f"Unexpected response from peer {peer_node_name}: {response.status}")
+                logger.error(f"Unexpected response from peer {node_names[peer_node_name]}: {response.status}")
         except grpc.RpcError as e:
-            logger.error(f"Failed to send shares to peer {peer_node_name}: {e}")
+            logger.error(f"Failed to send shares to peer {node_names[peer_node_name]}: {e}")
 
 def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     try:
@@ -166,9 +176,9 @@ def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
             print("-- ALL SHARES RECEIVED --")
             # Combine local and received shares properly with client IDs
             all_shares = {f"client_{i}": shares for i, shares in enumerate(
-                [local_shares] + list(smpc_client.received_shares.values())
+                [local_shares] + [smpc_client.received_shares[x] for x in smpc_client.received_shares.keys()]
             )}
-            print("-- RECONSTRUCTING ALL SAHRES --")
+
             # Now reconstruct properly
             aggregated_shares = smpc_client.reconstruct_model_weights(all_shares)
 
@@ -176,11 +186,11 @@ def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
             smpc_client.all_shares_received.clear()
             smpc_client.received_shares.clear()
 
-            return aggregated_shares, len(smpc_client.x_train), {}
+            return aggregated_shares
         else:
             # Solo client case
-            return smpc_client.model.get_weights(), len(smpc_client.x_train), {}
+            return smpc_client.model.get_weights()
     except TimeoutError as e:
         logger.error(f"Client {smpc_client.client_id} failed to receive all shares: {e}")
-        return None, 0, {}
+        return None
 

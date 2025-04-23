@@ -5,7 +5,8 @@ from fl_client import stages
 from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
 from interfaces import recordset
-from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, split_model_parameters_to_shares
+from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, split_model_parameters_to_shares, numpy_dict_to_torch_state_dict
+from fl_models.iris.utils import Utils
 
 logger = structlog.get_logger()
 
@@ -39,25 +40,26 @@ def train_model_if(msg: Message, global_vars: dict) -> Message:
     )
     stages.set_model_parameters(latest_parameters, global_vars)
     metrics = stages.train_model(global_vars, current_global_iter)
+    print("-----")
+    print(metrics)
+    print("-----")
     latest_parameters = stages.get_model_parameters(global_vars)
-    logger.info(latest_parameters)
-    logger.info("-- LATEST PARAMETERS ND ARRAYS--")
+
     serialized_params = serialize_parameters(latest_parameters)
     deserialized_params = deserialize_parameters(serialized_params)
 
     all_node_names = list(global_vars["discovered_peers_ids"])
     all_node_names.append(global_vars["node_name"])
     local_shares, remote_shares = split_model_parameters_to_shares(deserialized_params, all_node_names, global_vars["node_name"])
-    print("LOCAL SHARES")
-    print(local_shares)
-    print("REMOTE SHARES")
-    print(remote_shares)
+
     logger.info(deserialized_params)
-    print("-- SNEDING SHARES TO PEERS --")
+    print("-- SENDING SHARES TO PEERS --")
     stages.send_shares_to_peers(remote_shares, global_vars["peer_stubs"], global_vars["node_name"])
-    latest_parameters, _, _ = stages.reconstruct_shares(local_shares, global_vars['smpc_client'])
-    
-    return responses_utils.create_train_response(msg, latest_parameters, metrics)
+    latest_parameters = stages.reconstruct_shares(local_shares, global_vars['smpc_client'])
+
+    latest_parameters = numpy_dict_to_torch_state_dict(latest_parameters)
+    parameter_record = Utils.pytorch_to_parameter_record(latest_parameters)
+    return responses_utils.create_train_response(msg, parameter_record, metrics)
 
 
 def get_parameters_if(msg: Message, global_vars: dict) -> Message:
@@ -92,7 +94,6 @@ def clean_config_if(msg: Message) -> Message:
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
     use_case = recordset.read_filter_clients_recordset(msg.content)
     if use_case == global_vars["use_case"]:
-        print("RETURN PARTICIPATE = TRUE")
         return responses_utils.create_participate_response(msg, True)
     return responses_utils.create_participate_response(msg, False)
 

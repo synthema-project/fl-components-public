@@ -16,14 +16,17 @@ class SMPCServicer(smpc_pb2_grpc.SMPCServicer):
     def SendShares(self, request, context):
         client_id = request.client_id
         shares = []
+        shares_dict = {}
         for share in request.shares:
             shape = tuple(share.shape)
             data = np.frombuffer(share.data, dtype=np.float32)
             if data.size != np.prod(shape):
                 logger.error(f"Mismatch in data size and shape: {data.size} != {np.prod(shape)}")
                 return smpc_pb2.AckResponse(status="ERROR")
+            matrix = data.reshape(shape)
+            shares_dict[share.name] = matrix
             shares.append(data.reshape(shape))
-        self.client.receive_shares(client_id, shares)
+        self.client.receive_shares(client_id, shares_dict)
         return smpc_pb2.AckResponse(status="ACK")
 
 class SMPCClient():
@@ -70,13 +73,13 @@ class SMPCClient():
         logger.error(f"Client {self.client_id} could not establish connections to all peers after {max_retries} attempts.")
         return self.peer_stubs
 
-    def receive_shares(self, sending_client_id: str, shares: list):
+    def receive_shares(self, sending_client_id: str, shares: dict):
         """
         Receives secret shares from a peer client.
 
         Parameters:
         sending_client_id (str): The ID of the client sending the shares.
-        shares (list of np.ndarray): List of secret shares received from the peer client.
+        shares (dict): Dictionary of secret shares received from the peer client.
         """
         logger.info(f"Client {self.client_id} received shares from client {sending_client_id}")
 
@@ -101,12 +104,13 @@ class SMPCClient():
         Returns:
         Dict[str, np.ndarray]: A dictionary mapping parameter names to the reconstructed weights.
         """
+        # Check if shares_grouped_by_client is empty
         if not shares_grouped_by_client:
             raise ValueError("No shares provided for reconstruction.")
-        
+
         # Get the list of parameter names from any client
         param_keys = next(iter(shares_grouped_by_client.values())).keys()
-        
+
         reconstructed_weights = {}
         for param_key in param_keys:
             # Sum the shares for each parameter key
