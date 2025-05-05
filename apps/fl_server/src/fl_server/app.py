@@ -48,8 +48,8 @@ async def set_SMPC_enabled(
     task: TaskRead, driver: Driver, node_ids: list[int]
 ) -> None:
     """Sets SMPC enabled flag for the task."""
-    stages.set_SMPC_enabled(task.SMPC_enalbled, config.global_vars)
-    requires.set_SMPC_enabled(driver, node_ids, task.SMPC_enalbled)
+    stages.set_SMPC_enabled(task.SMPC_enabled, config.global_vars)
+    requires.set_SMPC_enabled(driver, node_ids, task.SMPC_enabled)
 
 
 async def execute_training_loop(
@@ -93,7 +93,7 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
     logger.info("Loading model and data")
     await load_model_and_data(task, driver, filtered_node_ids)
 
-    if task.SMPC_enalbled:
+    if task.SMPC_enabled:
         await set_SMPC_enabled(task, driver, filtered_node_ids)
         port = config.P2P_PORT
         logger.info("Starting P2P servers")
