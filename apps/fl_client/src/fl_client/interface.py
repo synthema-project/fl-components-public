@@ -33,6 +33,10 @@ def upload_model_if(msg: Message, global_vars: dict) -> Message:
         msg, model_info["model_id"], model_info["run_id"]
     )
 
+def set_smpc_enabled_if(msg: Message, global_vars: dict) -> Message:
+    smpc_enabled = recordset.read_set_smpc_enabled_recordset(msg.content)
+    stages.set_SMPC_enabled(smpc_enabled, global_vars)
+    return responses_utils.create_success_response(msg, "set smpc enabled successfully")
 
 def train_model_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters, current_global_iter = recordset.read_train_model_recordset(
@@ -40,9 +44,16 @@ def train_model_if(msg: Message, global_vars: dict) -> Message:
     )
     stages.set_model_parameters(latest_parameters, global_vars)
     metrics = stages.train_model(global_vars, current_global_iter)
-    print("-----")
-    print(metrics)
-    print("-----")
+    latest_parameters = stages.get_model_parameters(global_vars)
+    return responses_utils.create_train_response(msg, latest_parameters, metrics)
+
+
+def train_model_SMPC_if(msg: Message, global_vars: dict) -> Message:
+    latest_parameters, current_global_iter = recordset.read_train_model_recordset(
+        msg.content
+    )
+    stages.set_model_parameters(latest_parameters, global_vars)
+    metrics = stages.train_model(global_vars, current_global_iter)
     latest_parameters = stages.get_model_parameters(global_vars)
 
     serialized_params = serialize_parameters(latest_parameters)
@@ -53,7 +64,7 @@ def train_model_if(msg: Message, global_vars: dict) -> Message:
     local_shares, remote_shares = split_model_parameters_to_shares(deserialized_params, all_node_names, global_vars["node_name"])
 
     logger.info(deserialized_params)
-    print("-- SENDING SHARES TO PEERS --")
+    print("-- Sending shares to peers --")
     stages.send_shares_to_peers(remote_shares, global_vars["peer_stubs"], global_vars["node_name"])
     latest_parameters = stages.reconstruct_shares(local_shares, global_vars['smpc_client'])
 

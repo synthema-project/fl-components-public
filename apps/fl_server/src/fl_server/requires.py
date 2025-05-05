@@ -177,6 +177,21 @@ def train_model(
         for msg in all_replies
     ]
 
+def set_SMPC_enabled(
+    driver: Driver,
+    node_ids: list[int],
+    smpc_enabled: bool,
+) -> None:
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_set_smpc_enabled_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="set_smpc_enabled",
+        recordset_factory_args=(smpc_enabled,),
+        check_success=True,
+    )
+
 
 def clean_config(
     driver: Driver,

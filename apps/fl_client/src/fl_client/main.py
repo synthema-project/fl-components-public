@@ -17,7 +17,9 @@ from fl_client.interface import (
     upload_model_if,
     get_peer_discovery_if,
     connect_peers_if,
-    start_P2P_server_if
+    start_P2P_server_if,
+    train_model_SMPC_if,
+    set_smpc_enabled_if
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -30,6 +32,7 @@ global_vars = {
     "use_case": "iris",
     "node_name": NODE_NAME,
     "data_path": DATA_PATH,
+    "SMPC_enabled": False,
     "peers": None,
     "peer_stubs": None,
     "smpc_client": None,
@@ -66,6 +69,9 @@ def query(msg: Message, ctx: Context) -> Message:
     elif mode == "set_run_config":
         return set_run_config_if(msg, global_vars)
 
+    elif mode == "set_smpc_enabled":
+        return set_smpc_enabled_if(msg, global_vars)
+
     elif mode == "prepare_data":
         return prepare_data_if(msg, global_vars)
 
@@ -90,7 +96,10 @@ def query(msg: Message, ctx: Context) -> Message:
 @app.train()
 def train(msg: Message, ctx: Context) -> Message:
     global global_vars
-    return train_model_if(msg, global_vars)
+    if global_vars["SMPC_enabled"]:
+        return train_model_SMPC_if(msg, global_vars)
+    else:
+        return train_model_if(msg, global_vars)
 
 
 @app.evaluate()

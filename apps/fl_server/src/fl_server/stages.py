@@ -11,6 +11,13 @@ def load_model(
     global_vars["model"] = mlf_model
     global_vars["aggregator"] = mlf_model.unwrap_python_model().create_aggregator()
 
+def set_SMPC_enabled(
+    smpc_enabled: bool,
+    global_vars: dict[str, Any],
+) -> None:
+    global_vars["SMPC_enabled"] = smpc_enabled
+    print(f"SMPC enabled set to {smpc_enabled}")
+
 
 def aggregate_parameters(
     parameter_list: list[ParametersRecord],

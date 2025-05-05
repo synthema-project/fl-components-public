@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-
+from typing import Optional
 from sqlmodel import SQLModel, Field, Column, Enum
 from pydantic import BaseModel
 
@@ -27,7 +27,7 @@ class TaskBase(SQLModel):
     num_global_iterations: int = Field(nullable=False)
     run_name: str = Field(nullable=False)
     experiment_name: str = Field(nullable=False)
-
+    SMPC_enabled: bool = Field(default=False)
 
 class TaskRead(TaskBase, table=True):
     id: int = Field(default=None, primary_key=True, nullable=False)

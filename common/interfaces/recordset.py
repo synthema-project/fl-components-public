@@ -217,3 +217,18 @@ def create_connect_peers_recordset(node_ids: list[int], peers: list[list[str]]) 
         }
     )
     return RecordSet(configs_records={"config": configsrecord})
+
+def create_set_smpc_enabled_recordset(smpc_enabled: bool) -> RecordSet:
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "set_smpc_enabled",
+            "smpc_enabled": smpc_enabled
+        }
+    )
+    return RecordSet(configs_records={"config": configsrecord})
+
+def read_set_smpc_enabled_recordset(recordset: RecordSet) -> bool:
+    smpc_enabled = recordset.configs_records["config"]["smpc_enabled"]
+    if not isinstance(smpc_enabled, bool):
+        raise TypeError(f"smpc_enabled must be a boolean, received {type(smpc_enabled)}")
+    return smpc_enabled

@@ -110,6 +110,10 @@ def set_discovered_peers(discovered_peers: List, discovered_peers_ids: List[str]
     global_vars['discovered_peers_ids'] = discovered_peers_ids
     return discovered_peers
 
+def set_SMPC_enabled(SMPC_enabled: bool, global_vars: dict) -> bool:
+    global_vars["SMPC_enabled"] = SMPC_enabled
+    return SMPC_enabled
+
 def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
     smpc_client = global_vars["smpc_client"]
     peer_stubs = smpc_client.connect_to_peers(discovered_peers)
@@ -180,13 +184,13 @@ def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
             )}
 
             # Now reconstruct properly
-            aggregated_shares = smpc_client.reconstruct_model_weights(all_shares)
+            reconstructed_shares = smpc_client.reconstruct_model_weights(all_shares)
 
             # Reset for next round
             smpc_client.all_shares_received.clear()
             smpc_client.received_shares.clear()
 
-            return aggregated_shares
+            return reconstructed_shares
         else:
             # Solo client case
             return smpc_client.model.get_weights()
