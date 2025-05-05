@@ -97,8 +97,10 @@ def query(msg: Message, ctx: Context) -> Message:
 def train(msg: Message, ctx: Context) -> Message:
     global global_vars
     if global_vars["SMPC_enabled"]:
+        logger.info("Training with SMPC enabled")
         return train_model_SMPC_if(msg, global_vars)
     else:
+        logger.info("Training without SMPC")
         return train_model_if(msg, global_vars)
 
 
