@@ -153,6 +153,24 @@ def set_run_config(
     )
 
 
+def set_dp_config(
+    driver: Driver,
+    node_ids: list[int],
+    dp_mode: str,
+    noise_multiplier: int,
+    clipping_norm: int
+) -> None:
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_set_dp_cfg_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="set_dp_config",
+        recordset_factory_args=(dp_mode, clipping_norm,noise_multiplier),
+        check_success=True,
+    )
+
+
 def train_model(
     driver: Driver,
     node_ids: list[int],

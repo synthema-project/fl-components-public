@@ -15,4 +15,6 @@ global_vars = {
     "model": None,
     "model_meta": None,
     "use_case": None,
+    "dp_config": None,
+    "number_of_clients":None
 }

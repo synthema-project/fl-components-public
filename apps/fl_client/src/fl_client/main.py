@@ -13,13 +13,15 @@ from fl_client.interface import (
     prepare_data_if,
     set_parameters_if,
     set_run_config_if,
+    train_model_fixed_clipping_if,
     train_model_if,
     upload_model_if,
     get_peer_discovery_if,
     connect_peers_if,
     start_P2P_server_if,
     train_model_SMPC_if,
-    set_smpc_enabled_if
+    set_smpc_enabled_if,
+    set_dp_config_if
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -37,7 +39,8 @@ global_vars = {
     "peer_stubs": None,
     "smpc_client": None,
     "discovered_peers": None,
-    "discovered_peers_ids": None
+    "discovered_peers_ids": None,
+    "dp_config": None
 }
 
 setup_mlflow(MLFLOW_URL)
@@ -71,6 +74,8 @@ def query(msg: Message, ctx: Context) -> Message:
 
     elif mode == "set_smpc_enabled":
         return set_smpc_enabled_if(msg, global_vars)
+    elif mode == "set_dp_config":
+        return set_dp_config_if(msg, global_vars)
 
     elif mode == "prepare_data":
         return prepare_data_if(msg, global_vars)
@@ -96,11 +101,17 @@ def query(msg: Message, ctx: Context) -> Message:
 @app.train()
 def train(msg: Message, ctx: Context) -> Message:
     global global_vars
-    if global_vars["SMPC_enabled"]:
+    if global_vars["dp_config"]["dp_mode"] == "central_dp" and global_vars["SMPC_enabled"]:
+        # Throw exception if both SMPC and DP are enabled
+        raise RuntimeError(
+            "Cannot use both SMPC and DP in central_dp mode. Please disable one of them."
+        )
+    elif global_vars["SMPC_enabled"]:
         logger.info("Training with SMPC enabled")
         return train_model_SMPC_if(msg, global_vars)
-    else:
-        logger.info("Training without SMPC")
+    elif global_vars["dp_config"]["dp_mode"] == "central_dp":
+        return train_model_fixed_clipping_if(msg, global_vars)
+    else:    
         return train_model_if(msg, global_vars)
 
 
