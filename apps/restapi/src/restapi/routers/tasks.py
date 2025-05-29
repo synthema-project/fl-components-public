@@ -1,9 +1,9 @@
 from typing import Sequence
-from fastapi import APIRouter, Response, Depends
+from fastapi import APIRouter, Response, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlmodel import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from pydantic import ValidationError
 from restapi.db import get_session
 from restapi import config
 from interfaces.rabbitmq_client import AsyncRabbitMQClient
@@ -55,17 +55,24 @@ async def create_task(
     session: AsyncSession = Depends(get_session),
     rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
 ) -> TaskRead:
-    db_task = TaskRead.model_validate(task)
-    session.add(db_task)
-    await session.commit()
-    await session.refresh(db_task)
+    try:
+        db_task = TaskRead.model_validate(task)
+        session.add(db_task)
+        await session.commit()
+        await session.refresh(db_task)
 
-    # Publish message to RabbitMQ
-    await rabbitmqs["dispatch"].publish_message(
-        TaskRead.model_validate(db_task).model_dump_json()
-    )
+        # Publish message to RabbitMQ
+        await rabbitmqs["dispatch"].publish_message(
+            TaskRead.model_validate(db_task).model_dump_json()
+        )
 
-    return db_task
+        return db_task
+    except ValidationError as e:
+        # Handle Pydantic validation errors
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Validation error: {str(e)}"
+        )
 
 
 @router.put("/cancel/{task_id}", response_model=TaskRead)

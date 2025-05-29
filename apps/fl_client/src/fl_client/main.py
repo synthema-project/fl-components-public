@@ -101,17 +101,21 @@ def query(msg: Message, ctx: Context) -> Message:
 @app.train()
 def train(msg: Message, ctx: Context) -> Message:
     global global_vars
-    if global_vars["dp_config"]["dp_mode"] == "central_dp" and global_vars["SMPC_enabled"]:
-        # Throw exception if both SMPC and DP are enabled
-        raise RuntimeError(
-            "Cannot use both SMPC and DP in central_dp mode. Please disable one of them."
-        )
-    elif global_vars["SMPC_enabled"]:
+
+    dp_config = global_vars.get("dp_config")
+    smpc_enabled = global_vars.get("SMPC_enabled", False)
+
+    # Check for incompatible configuration
+    if dp_config and dp_config.get("dp_mode") == "central_dp" and smpc_enabled:
+        raise RuntimeError("Cannot use both SMPC and DP in central_dp mode. Please disable one of them.")
+
+    # Route to appropriate training function
+    if smpc_enabled:
         logger.info("Training with SMPC enabled")
         return train_model_SMPC_if(msg, global_vars)
-    elif global_vars["dp_config"]["dp_mode"] == "central_dp":
+    elif dp_config and dp_config.get("dp_mode") == "central_dp":
         return train_model_fixed_clipping_if(msg, global_vars)
-    else:    
+    else:
         return train_model_if(msg, global_vars)
 
 

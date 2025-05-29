@@ -132,7 +132,6 @@ def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
         "model_version": model_version,
     }
 
-<<<<<<< HEAD
 def read_start_P2P_server_recordset(recordset: RecordSet) -> dict:
     port = recordset.configs_records["config"]["port"]
     if not isinstance(port, int):
@@ -156,7 +155,6 @@ def read_discover_peers_recordset(recordset: RecordSet) -> dict:
         "client_port": client_port,
         "max_discovery_time": max_discovery_time
     }
-=======
 def create_set_dp_cfg_recordset(
     dp_mode: str, clipping_norm: int, noise_multiplier: int
 ) -> RecordSet:
@@ -191,7 +189,6 @@ def read_set_dp_cfg_recordset(recordset: RecordSet) -> dict:
     }
 
 
->>>>>>> origin/dev-dp-new
 
 def create_train_model_recordset(
     parametersrecord: ParametersRecord, current_global_iter: int
