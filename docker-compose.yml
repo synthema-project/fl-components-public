@@ -2,6 +2,8 @@ services:
   postgres:
     image: bitnami/postgresql
     container_name: postgres
+    ports:
+      - 5432:5432
     environment:
       POSTGRESQL_USER: username
       POSTGRESQL_PASSWORD: password
@@ -12,6 +14,9 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13.3-management
+    ports:
+      - 5672:5672 # RabbitMQ AMQP port
+      - 15672:15672 # RabbitMQ Management UI
     container_name: rabbitmq
     environment:
       - RABBITMQ_DEFAULT_USER=username
@@ -37,6 +42,8 @@ services:
   
   flower-superlink:
     image: flwr/superlink:1.9.0
+    ports:
+      - 9092:9092 # FL server port
     container_name: flower-superlink
     command: ["--insecure"]
 
@@ -48,6 +55,9 @@ services:
         BASE_IMAGE: fl-common
         CURRENT_VERSION: latest
     image: synthema-fl-client:test
+    ports:
+      - 9876:9876 # Discovery port
+      - 50051:50051 # gRPC port (P2P)
     container_name: synthema-fl-client1
     command: ["flower-client-app", "--superlink", "flower-superlink:9092","--insecure", "src.fl_client.main:app"]
     depends_on:
@@ -65,6 +75,9 @@ services:
   # Reuse the image for client 2
   synthema-fl-client-2:
     image: synthema-fl-client:test  # Reuse the image built for client-1
+    ports:
+      - 9876:9876 # Discovery port
+      - 50051:50051 # gRPC port (P2P)
     container_name: synthema-fl-client2
     command: ["flower-client-app", "--superlink", "flower-superlink:9092","--insecure", "src.fl_client.main:app"]
     depends_on:
@@ -82,6 +95,9 @@ services:
   # Reuse the image for client 3
   synthema-fl-client-3:
     image: synthema-fl-client:test  # Reuse the image built for client-1
+    ports:
+      - 9876:9876 # Discovery port
+      - 50051:50051 # gRPC port (P2P)
     container_name: synthema-fl-client3
     command: ["flower-client-app", "--superlink", "flower-superlink:9092","--insecure", "src.fl_client.main:app"]
     depends_on:
@@ -103,6 +119,8 @@ services:
         BASE_IMAGE: fl-common
         CURRENT_VERSION: latest
     image: synthema-fl-server:test
+    ports:
+      - 9091:9091 # FL server port
     container_name: synthema-fl-server
     command: ["python", "-m", "src.fl_server.main", "--superlink", "flower-superlink:9091"]
     depends_on:

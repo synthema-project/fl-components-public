@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: synthema-fl-client-3
+  name: synthema-fl-client-3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: synthema-fl-client-3
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: synthema-fl-client-3
+    spec:
+      containers:
+        - args:
+            - flower-client-app
+            - --superlink
+            - flower-superlink:9092
+            - --insecure
+            - src.fl_client.main:app
+          env:
+            - name: DATA_PATH
+              value: /common/fl_models/iris/data.csv
+            - name: MLFLOW_URL
+              value: http://mlflow
+            - name: NODE_NAME
+              value: test3
+          image: synthema-fl-client:test
+          name: synthema-fl-client3
+          ports:
+            - containerPort: 9876
+              protocol: TCP
+            - containerPort: 50051
+              protocol: TCP
+          resources:
+            limits:
+              cpu: "1"
+      restartPolicy: Always
