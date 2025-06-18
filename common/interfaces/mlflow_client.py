@@ -10,6 +10,8 @@ from mlflow.data.meta_dataset import MetaDataset
 from mlflow.data.http_dataset_source import HTTPDatasetSource
 
 from .utils import ensure_bool, MutableBoolean
+import requests
+import os
 
 mlflow.set_system_metrics_sampling_interval(0.5)
 
@@ -66,6 +68,20 @@ _configured = MutableBoolean(False)
 _current_config = __Config
 _mlflow_client = cast(MlflowClient, None)
 
+def get_token():
+    response = requests.post(
+        "https://identity.gatv.es/realms/synthia/protocol/openid-connect/token",
+        data={
+            "client_id": "mlflow",
+            "client_secret": "gEO9IILpcUy8Rr8B4md1EYfiqbvqLwpD",
+            "grant_type": "password",
+            "username": "santibl",
+            "password": "gatvgatv"
+        },
+    )
+    response.raise_for_status()
+    return response.json().get("access_token")
+
 
 def setup_mlflow(tracking_url: str, is_central_node: bool = False) -> None:
     """
@@ -78,7 +94,16 @@ def setup_mlflow(tracking_url: str, is_central_node: bool = False) -> None:
     global _mlflow_client, _initialized, _current_config
     _current_config.is_central_node = is_central_node
     mlflow.set_tracking_uri(tracking_url)
+
+    # Fetch token
+    token = get_token()
+    os.environ["MLFLOW_TRACKING_TOKEN"] = token
+
+    # Initialize MLflowClient without headers (it will use the env var)
     _mlflow_client = MlflowClient(tracking_url)
+
+    # Initialize MLflowClient with authentication
+    _mlflow_client = MlflowClient(tracking_uri=tracking_url)
     _initialized.value = True
 
 

@@ -1,5 +1,5 @@
 from typing import Sequence
-from fastapi import APIRouter, Response, Depends
+from fastapi import APIRouter, Response, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlmodel import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +8,9 @@ from restapi.db import get_session
 from restapi import config
 from interfaces.rabbitmq_client import AsyncRabbitMQClient
 from schemas.task import TaskCreate, TaskRead, TaskStatus
+
+#from restapi.auth import verify_token, verify_token_and_role
+from restapi.auth import get_current_user, get_current_user_with_restricted_role
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -26,6 +29,7 @@ async def get_rabbitmqs() -> dict[str, AsyncRabbitMQClient]:
 @router.get("/", response_model=list[TaskRead])
 async def get_tasks_all(
     session: AsyncSession = Depends(get_session),
+    user: dict = Depends(get_current_user),
 ) -> Sequence[TaskRead]:
     result = await session.execute(select(TaskRead))
     return result.scalars().all()
@@ -33,7 +37,8 @@ async def get_tasks_all(
 
 @router.get("/{task_id}", response_model=TaskRead)
 async def get_task_by_id(
-    task_id: int, session: AsyncSession = Depends(get_session)
+    task_id: int, session: AsyncSession = Depends(get_session),
+    user: dict = Depends(get_current_user),
 ) -> JSONResponse | TaskRead:
     task = await session.get(TaskRead, task_id)
     if not task:
@@ -43,7 +48,8 @@ async def get_task_by_id(
 
 @router.get("/user/{user_id}", response_model=list[TaskRead])
 async def get_tasks_by_user(
-    user_id: str, session: AsyncSession = Depends(get_session)
+    user_id: str, session: AsyncSession = Depends(get_session),
+    user: dict = Depends(get_current_user),
 ) -> Sequence[TaskRead]:
     result = await session.execute(select(TaskRead).where(TaskRead.user_id == user_id))
     return result.scalars().all()
@@ -54,6 +60,7 @@ async def create_task(
     task: TaskCreate,
     session: AsyncSession = Depends(get_session),
     rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
+    user: dict = Depends(get_current_user_with_restricted_role),
 ) -> TaskRead:
     db_task = TaskRead.model_validate(task)
     session.add(db_task)
@@ -73,7 +80,9 @@ async def cancel_task(
     task_id: int,
     session: AsyncSession = Depends(get_session),
     rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
+    user: dict = Depends(get_current_user),
 ) -> TaskRead | Response:
+
     task = await session.get(TaskRead, task_id)
     if not task:
         return JSONResponse(status_code=404, content={"message": "Task not found"})
@@ -87,7 +96,8 @@ async def cancel_task(
 
 @router.delete("/{task_id}")
 async def delete_task(
-    task_id: int, session: AsyncSession = Depends(get_session)
+    task_id: int, session: AsyncSession = Depends(get_session),
+    user: dict = Depends(get_current_user),
 ) -> Response:
     task = await session.get(TaskRead, task_id)
     if not task:
@@ -99,7 +109,9 @@ async def delete_task(
 
 
 @router.delete("/")
-async def delete_all_tasks(session: AsyncSession = Depends(get_session)) -> Response:
+async def delete_all_tasks(session: AsyncSession = Depends(get_session),
+    user = Depends(get_current_user_with_restricted_role(required_roles=["central_node_admin"])),
+) -> Response:
     await session.execute(delete(TaskRead))
     await session.commit()
     return JSONResponse({"message": "All tasks deleted"})

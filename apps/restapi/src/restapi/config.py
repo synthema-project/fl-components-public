@@ -26,5 +26,15 @@ if DB_MODE == "postgresql":
     POSTGRES_HOST = get_env_variable("POSTGRES_HOST")
     POSTGRES_PORT = int(get_env_variable("POSTGRES_PORT"))
 
+
+KEYCLOAK_SERVER_URL = get_env_variable("KEYCLOAK_SERVER_URL")
+KEYCLOAK_CLIENT_ID = get_env_variable("KEYCLOAK_CLIENT_ID")
+KEYCLOAK_CLIENT_SECRET = get_env_variable("KEYCLOAK_CLIENT_SECRET")
+KEYCLOAK_REALM_NAME = get_env_variable("KEYCLOAK_REALM_NAME")
+KEYCLOAK_REDIRECT_URI = get_env_variable("KEYCLOAK_REDIRECT_URI")
+KEYCLOAK_AUTHORIZED_ROLE = get_env_variable("KEYCLOAK_AUTHORIZED_ROLE")
+KEYCLOAK_AUTHORIZED_GROUP = get_env_variable("KEYCLOAK_AUTHORIZED_GROUP") # Keycloak uses `/` prefix for group paths
+KEYCLOAK_ADMIN_CLIENT_SECRET = get_env_variable("KEYCLOAK_ADMIN_CLIENT_SECRET")
+
 # Global object for shared runtime config
 obj: dict[str, Any] = {}
