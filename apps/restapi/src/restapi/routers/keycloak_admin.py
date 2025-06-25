@@ -18,6 +18,9 @@ class CreateUserRequest(BaseModel):
     lastName: str = ""
     enabled: bool = True
     password: str
+    is_admin: bool = False
+    role_names: List[str] = []
+    group_name: str = ""
 
 class CreateGroupRequest(BaseModel):
     name: str
@@ -86,7 +89,7 @@ def get_group(group_id: str, user = Depends(get_current_user_with_restricted_rol
 
 @router.get("/group/name/{group_name}")
 def get_group_by_name(group_name: str, user = Depends(get_current_user_with_restricted_role(required_roles=["central_node_admin"]))):
-    return keycloak.get_groups([group_name])
+    return keycloak.get_groups([group_name])[0]
 
 ## TODO
 @router.get("/group/{group_id}")
@@ -98,8 +101,6 @@ def get_full_group(group_id: str, user = Depends(get_current_user_with_restricte
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     })
-    print(response.json())
-
     response.raise_for_status()
     return response.json()
 
@@ -202,9 +203,9 @@ def get_all_roles(user = Depends(get_current_user_with_restricted_role(required_
 
 # User Roles
 
-# @router.post("/users/{user_id}/roles")
-# def add_roles_to_user(user_id: str, roles: Optional[List[str]] = Query(None)):
-#     return keycloak.add_user_roles(user_id=user_id, roles=roles)
+@router.post("/users/{user_id}/roles")
+def add_roles_to_user(user_id: str, roles: Optional[List[str]]):
+    return keycloak.add_user_roles(user_id=user_id, roles=roles)
 
 
 @router.get("/users/{user_id}/roles")
