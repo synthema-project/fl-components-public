@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from restapi.auth import get_current_user, get_current_user_with_restricted_role
 from requests.auth import HTTPBasicAuth
 import requests
+import json
 
 # --- Configuration ---
 MLFLOW_BASE_URL = "http://mlflow-tracking.synthia.svc.cluster.local:80"
@@ -37,8 +38,13 @@ class ObjectIdRequest(BaseModel):
 # --- Helper ---
 def safe_http_request(method: str, endpoint: str, **kwargs):
     url = f"{MLFLOW_BASE_URL}{endpoint}"
+    headers = kwargs.pop("headers", {})
+    if "json" in kwargs:
+        # Convert JSON to string and set header if not already there
+        headers.setdefault("Content-Type", "application/json")
+        kwargs["data"] = json.dumps(kwargs.pop("json"))
     try:
-        response = requests.request(method, url, auth=get_auth(), **kwargs)
+        response = requests.request(method, url, auth=get_auth(), headers=headers,  **kwargs)
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=response.text)
         return response.json()
@@ -57,10 +63,10 @@ def get_user(username: str, user=Depends(get_current_user)):
     return safe_http_request("GET", "/api/2.0/mlflow/users/get", params={"username": username})
 
 def update_password(payload: UpdatePasswordRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-    return safe_http_request("POST", "/api/2.0/mlflow/users/update-password", json=payload.dict())
+    return safe_http_request("PATCH", "/api/2.0/mlflow/users/update-password", json=payload.dict())
 
 def update_admin(payload: UpdateAdminRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-    return safe_http_request("POST", "/api/2.0/mlflow/users/update-admin", json=payload.dict())
+    return safe_http_request("PATCH", "/api/2.0/mlflow/users/update-admin", json=payload)
 
 def get_model_permissions(username: str):
     # Example API call to get all model permissions for user
@@ -97,21 +103,21 @@ def delete_experiment_permission(object_id: str, username: str):
     )
 
 
-def delete_user(payload: dict, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-    username = payload.get("username")
+def delete_user(username: str, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
     if not username:
         raise HTTPException(status_code=400, detail="Username is required for deletion")
 
     # 1. Delete all model permissions for the user
-    for perm in get_model_permissions(username):
-        delete_model_permission(perm["object_id"], username)
+    #for perm in get_model_permissions(username):
+    #    delete_model_permission(perm["object_id"], username)
 
     # 2. Delete all experiment permissions for the user
-    for perm in get_experiment_permissions(username):
-        delete_experiment_permission(perm["object_id"], username)
+    #for perm in get_experiment_permissions(username):
+    #    delete_experiment_permission(perm["object_id"], username)
 
+    payload = {"username": username}
     # 3. Delete user form MLFlow
-    return safe_http_request("POST", "/api/2.0/mlflow/users/delete", json=payload)
+    return safe_http_request("DELETE", "/api/2.0/mlflow/users/delete", json=payload)
 
 # ============================
 #   EXPERIMENT PERMISSIONS
@@ -151,6 +157,8 @@ def update_model_permission(payload: PermissionRequest, user=Depends(get_current
 
 # --- Experiments ---
 def search_experiments(payload: dict = {}, user: dict = Depends(get_current_user)):
+    if not payload.get("max_results"):
+        payload["max_results"] = 100
     return safe_http_request("POST", "/api/2.0/mlflow/experiments/search", json=payload)
 
 def get_experiment(experiment_id: str, user: dict = Depends(get_current_user)):
@@ -219,6 +227,50 @@ def get_child_runs_by_name(run_name: str, experiment_id: str, user: dict = Depen
     if run_id:
         return get_child_runs(run_id, experiment_id, user)
     return {"error": "Run not found"}
+
+
+def get_run_metrics(run_id: str, key: str, user: dict = Depends(get_current_user)):
+    """
+    Get metric history for a specific key from a run.
+
+    Args:
+        run_id: The ID of the MLflow run.
+        key: The name of the metric to retrieve.
+    """
+    params = {"run_id": run_id, "metric_key": key}
+    return safe_http_request("GET", "/api/2.0/mlflow/metrics/get-history", params=params)
+
+
+def get_all_run_metrics(run_id: str, user=Depends(get_current_user)):
+    metrics = {}
+
+    # Get list of metric keys first
+    run_data = get_run(run_id, user)
+    metric_keys = [metric["key"] for metric in run_data["run"]["data"].get("metrics", [])]
+
+    for key in metric_keys:
+        all_values = []
+        next_page_token = None
+
+        while True:
+            params = {
+                "run_id": run_id,
+                "metric_key": key,
+                "max_results": 1000,
+            }
+            if next_page_token:
+                params["page_token"] = next_page_token
+
+            response = safe_http_request("GET", "/api/2.0/mlflow/metrics/get-history", params=params)
+            all_values.extend(response.get("metrics", []))
+
+            next_page_token = response.get("next_page_token")
+            if not next_page_token:
+                break
+
+        metrics[key] = all_values
+
+    return {"run_id": run_id, "metrics": metrics}
 
 # --- Models ---
 def list_registered_models(user: dict = Depends(get_current_user)):

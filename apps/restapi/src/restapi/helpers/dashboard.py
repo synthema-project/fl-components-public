@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi_keycloak.model import KeycloakUser
+from typing import Optional, List
 
 from restapi.auth import keycloak, get_current_user, get_current_user_with_restricted_role
 from restapi.helpers.mlflow import (
@@ -10,7 +12,7 @@ from restapi.helpers.mlflow import (
     delete_user as mlflow_delete_user
 )
 
-from restapi.routers.keycloak_admin import get_keycloak_user_by_username
+from restapi.routers.keycloak_admin import get_keycloak_user_by_username, add_group_to_user, add_roles_to_user, get_group_by_name
 
 
 # ------------------ SCHEMAS ------------------ #
@@ -21,7 +23,10 @@ class CreateUserRequest(BaseModel):
     lastName: str = ""
     enabled: bool = True
     password: str
-    is_admin: bool = False  # New parameter
+    is_admin: bool = False
+    role_names: List[str] = []
+    group_name: str = ""
+
 
 
 class AdminStatusUpdateRequest(BaseModel):
@@ -37,7 +42,7 @@ class MLFlowUserCreateRequest(BaseModel):
 
 class UpdatePasswordRequest(BaseModel):
     username: str
-    new_password: str
+    password: str
 
 
 def user_exists_in_keycloak(username: str) -> bool:
@@ -79,7 +84,14 @@ def create_user(
     # Set admin status if requested
     if data.is_admin:
         set_keycloak_admin_status(data.username, make_admin=True)
-        mlflow_update_admin({"username": data.username, "admin": True})
+        mlflow_update_admin({"username": data.username, "is_admin": True})
+
+    if data.role_names:
+        add_roles_to_user(new_user.id, data.role_names)
+
+    if data.group_name:
+        group = get_group_by_name(data.group_name)
+        add_group_to_user(new_user.id, group.id)
 
     return new_user
 
@@ -91,12 +103,12 @@ def delete_user(
     # Delete from Keycloak
     user_obj = get_keycloak_user_by_username(username)
     if user_obj:
-        keycloak.delete_user(user_obj["id"])
+        keycloak.delete_user(user_obj.id)
     else:
         print(f"User '{username}' not found in Keycloak")
 
     # Delete from MLflow using imported method
-    mlflow_delete_user({"username": username})
+    mlflow_delete_user(username, user)
 
     return {"message": f"User '{username}' deleted successfully"}
 
@@ -106,7 +118,8 @@ def update_user_password(
     user=Depends(get_current_user_with_restricted_role(required_roles=["central_node_admin"]))
 ):
     # Update in Keycloak
-    keycloak.update_user_password(username=data.username, password=data.new_password)
+    userinfo = get_keycloak_user_by_username(data.username)
+    keycloak.change_password(user_id=userinfo.id, new_password=data.password)
 
     # Update in MLflow using imported method
     mlflow_update_password(data)
@@ -119,20 +132,24 @@ def set_mlflow_admin_status(username: str, make_admin: bool):
     mlflow_update_admin({"username": username, "admin": make_admin})
 
 
-def set_keycloak_admin_status(username: str, make_admin: bool):
-    user_id = keycloak.get_user_id(username)
-    if not user_id:
+def set_keycloak_admin_status(username: str, make_admin: bool, admin_role: str = "central_node_admin"):
+    user = keycloak.get_user(query=username)
+    if not user:
         raise HTTPException(status_code=404, detail=f"User '{username}' not found in Keycloak")
 
-    realm_roles = keycloak.get_realm_roles()
-    admin_role = next((r for r in realm_roles if r["name"] == "realm-admin"), None)
-    if not admin_role:
-        raise HTTPException(status_code=500, detail="Keycloak admin role not found")
+    all_roles = keycloak.get_all_roles()
+    # Extract role names
+    role_names = [role.name for role in all_roles]
 
+    # Check if the role exists
+    if admin_role not in role_names:
+        raise ValueError(f"Role '{admin_role}' not found in realm roles: {role_names}")
+
+    # Assign or remove the role
     if make_admin:
-        keycloak.assign_realm_roles(user_id=user_id, roles=[admin_role])
+        keycloak.add_user_roles(user_id=user.id, roles=[admin_role])
     else:
-        keycloak.remove_realm_roles(user_id=user_id, roles=[admin_role])
+        keycloak.remove_user_roles(user_id=user.id, roles=[admin_role])
 
 
 def update_admin_status(

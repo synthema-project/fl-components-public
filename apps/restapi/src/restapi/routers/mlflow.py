@@ -5,7 +5,7 @@ from requests.auth import HTTPBasicAuth
 import requests
 from restapi.helpers.mlflow import MLFlowUserCreateRequest, UpdatePasswordRequest, UpdateAdminRequest, PermissionRequest, ObjectIdRequest, safe_http_request
 from restapi.helpers.mlflow import create_user, get_user, update_password, update_admin, delete_user, create_experiment_permission, get_experiment_permission, update_experiment_permission, delete_experiment_permission, create_model_permission, get_model_permission, update_model_permission, delete_model_permission
-from restapi.helpers.mlflow import search_experiments, get_experiment, create_experiment, delete_experiment, restore_experiment, search_runs, get_run, delete_run, restore_run, list_registered_models, get_registered_model, create_registered_model, delete_registered_model, get_model_version, get_model_download_uri
+from restapi.helpers.mlflow import search_experiments, get_experiment, create_experiment, delete_experiment, restore_experiment, search_runs, get_run, delete_run, restore_run, list_registered_models, get_registered_model, create_registered_model, delete_registered_model, get_model_version, get_model_download_uri, get_all_run_metrics, get_run_metrics
 
 
 router_admin = APIRouter(prefix="/mlflow-admin", tags=["mlflow-admin"])
@@ -32,8 +32,8 @@ def update_admin_(payload: UpdateAdminRequest, user=Depends(get_current_user_wit
     return update_admin(payload, user)
 
 @router_admin.post("/users/delete")
-def delete_user_(payload: dict, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-    return delete_user(payload, user)
+def delete_user_(username: str, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
+    return delete_user(username, user)
 
 
 # ============================
@@ -118,6 +118,14 @@ def delete_run_(payload: dict, user: dict = Depends(get_current_user)):
 @router.post("/runs/restore")
 def restore_run_(payload: dict, user: dict = Depends(get_current_user)):
     return restore_run(payload, user)
+
+@router.post("/runs/metrics")
+def get_run_metric(run_id: str, key: str,  user: dict = Depends(get_current_user)):
+    return get_run_metrics(run_id,key, user)
+
+@router.post("/runs/metrics")
+def get_run_metrics(run_id: str, user: dict = Depends(get_current_user)):
+    return get_all_run_metrics(run_id, user)
 
 # --- Models ---
 @router.get("/registered-models/list")

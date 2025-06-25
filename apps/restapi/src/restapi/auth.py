@@ -67,6 +67,7 @@ def get_admin_token():
             status_code=500,
             detail=f"Failed to get token from Keycloak: {response.text}"
         )
+    print(response.json())
     return response.json()
 
 # def get_admin_token():
@@ -82,14 +83,14 @@ def get_admin_token():
 
 
 def logout_user(user_id: str):
-    token = get_admin_token()
+    token = get_admin_token()["access_token"]
     url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}/logout"
     response = requests.post(url, headers={"Authorization": f"Bearer {token}"})
     response.raise_for_status()
     return {"message": "User logged out"}
 
 def assign_realm_role_to_user(user_id: str, role_name: str):
-    token = get_admin_token()
+    token = get_admin_token()["access_token"]
 
     # Get the role from realm
     role_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/roles/{role_name}"
@@ -102,7 +103,7 @@ def assign_realm_role_to_user(user_id: str, role_name: str):
     return {"message": f"Role '{role_name}' assigned to user"}
 
 def remove_realm_role_from_user(user_id: str, role_name: str):
-    token = get_admin_token()
+    token = get_admin_token()["access_token"]
 
     # Get the role
     role_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/roles/{role_name}"
@@ -115,7 +116,7 @@ def remove_realm_role_from_user(user_id: str, role_name: str):
     return {"message": f"Role '{role_name}' removed from user"}
 
 def update_user_names(user_id: str, first_name: str, last_name: str):
-    token = get_admin_token()
+    token = get_admin_token()["access_token"]
     update_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}"
     payload = {
         "firstName": first_name,
@@ -126,7 +127,7 @@ def update_user_names(user_id: str, first_name: str, last_name: str):
     return {"message": "User name updated"}
 
 def upgrade_user_to_admin_keycloak(user_id: str):
-    token = get_admin_token()
+    token = get_admin_token()["access_token"]
 
     # Get the 'admin' role object
     role = requests.get(
@@ -141,7 +142,7 @@ def upgrade_user_to_admin_keycloak(user_id: str):
     return {"message": f"User {user_id} upgraded to admin in Keycloak"}
 
 def downgrade_user_from_admin_keycloak(user_id: str):
-    token = get_admin_token()
+    token = get_admin_token()["access_token"]
 
     role = requests.get(
         f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/roles/admin",
@@ -155,7 +156,7 @@ def downgrade_user_from_admin_keycloak(user_id: str):
 
 
 def get_group_members(group_id: str, brief_representation: bool = False):
-    token = get_admin_token()
+    token = get_admin_token()["access_token"]
 
     url = (
         f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/groups/{group_id}/members"
