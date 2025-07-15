@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synthema-fl-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: synthema-fl-server
+  template:
+    metadata:
+      labels:
+        app: synthema-fl-server
+    spec:
+      containers:
+        - name: synthema-fl-server
+          image: synthema-fl-server:test
+          command:
+            [
+              "python",
+              "-m",
+              "src.fl_server.main",
+              "--superlink",
+              "flower-superlink:9091",
+            ]
+          env:
+            - name: RABBIT_USERNAME
+              value: username
+            - name: RABBIT_PASSWORD
+              value: password
+            - name: RABBIT_HOST
+              value: rabbitmq
+            - name: RABBIT_PORT
+              value: "5672"
+            - name: MLFLOW_URL
+              value: http://mlflow
+          ports:
+            - containerPort: 9091
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: synthema-fl-server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9091
+      targetPort: 9091
+  selector:
+    app: synthema-fl-server

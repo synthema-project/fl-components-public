@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synthema-fl-client-3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: synthema-fl-client-3
+  template:
+    metadata:
+      labels:
+        app: synthema-fl-client-3
+    spec:
+      containers:
+        - name: synthema-fl-client-3
+          image: synthema-fl-client:test
+          command:
+            [
+              "flower-client-app",
+              "--superlink",
+              "flower-superlink:9092",
+              "--insecure",
+              "src.fl_client.main:app",
+            ]
+          env:
+            - name: MLFLOW_URL
+              value: http://mlflow
+            - name: NODE_NAME
+              value: test3
+            - name: DATA_PATH
+              value: /common/fl_models/iris/data.csv
+          ports:
+            - containerPort: 9876
+            - containerPort: 50051
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: synthema-fl-client-3
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9876
+      targetPort: 9876
+    - port: 50051
+      targetPort: 50051
+  selector:
+    app: synthema-fl-client-3
