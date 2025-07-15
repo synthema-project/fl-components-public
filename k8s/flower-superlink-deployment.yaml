@@ -15,6 +15,7 @@ spec:
       containers:
         - name: flower-superlink
           image: flwr/superlink:1.9.0
+          args: ["--insecure"]
           ports:
             - containerPort: 9092
 ---
