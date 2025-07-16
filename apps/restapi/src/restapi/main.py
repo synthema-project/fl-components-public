@@ -1,7 +1,7 @@
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from restapi.routers import tasks, mlflow, keycloak_admin, dashboard
+from restapi.routers import tasks, mlflow_router as mlflow, keycloak_admin, dashboard
 from restapi.services.lifespan import lifespan
 from restapi.auth import keycloak
 

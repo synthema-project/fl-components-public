@@ -7,8 +7,13 @@ import json
 
 # --- Configuration ---
 MLFLOW_BASE_URL = "http://mlflow-tracking.synthia.svc.cluster.local:80"
+MLFLOW_BASE_URL = "https://mlflow.synthia.gatv.es"
 MLFLOW_USERNAME = "mlflow"
 MLFLOW_PASSWORD = "mlflowpassword"
+
+import os
+os.environ["MLFLOW_TRACKING_USERNAME"] = MLFLOW_USERNAME
+os.environ["MLFLOW_TRACKING_PASSWORD"] = MLFLOW_PASSWORD
 
 def get_auth():
     return HTTPBasicAuth(MLFLOW_USERNAME, MLFLOW_PASSWORD)

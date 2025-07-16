@@ -4,7 +4,7 @@ from fastapi_keycloak.model import KeycloakUser
 from typing import Optional, List
 
 from restapi.auth import keycloak, get_current_user, get_current_user_with_restricted_role
-from restapi.helpers.mlflow import (
+from restapi.helpers.mlflow_helper import (
     create_user as mlflow_create_user,
     get_user as mlflow_get_user,
     update_password as mlflow_update_password,

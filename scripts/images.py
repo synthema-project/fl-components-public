@@ -112,7 +112,7 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
         build_args["BASE_IMAGE"] = base_image
 
     try:
-        client.images.build(path=str(path), tag=full_tag, rm=True, buildargs=build_args)
+        client.images.build(path=str(path), tag=full_tag, rm=True, buildargs=build_args, platform="linux/amd64")
         print(f"[OK] Built image: {full_tag}")
         return True
     except (BuildError, APIError) as e:

@@ -118,6 +118,14 @@ services:
       - POSTGRES_PORT=5432
       - DB_ECHO=true
       - DB_MODE=postgresql
+      - KEYCLOAK_SERVER_URL=https://identity.gatv.es
+      - KEYCLOAK_CLIENT_ID=task-api
+      - KEYCLOAK_CLIENT_SECRET=z0G8IbV0AKFjhkCVWaOSQ0M84HfjfnJi
+      - KEYCLOAK_REALM_NAME=synthia
+      - KEYCLOAK_REDIRECT_URI=https://api.synthia.gatv.es/callback
+      - KEYCLOAK_AUTHORIZED_ROLE=ai_practitioner
+      - KEYCLOAK_AUTHORIZED_GROUP=upm
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=G4tvG4tv
     depends_on:
       rabbitmq:
         condition: service_healthy
