@@ -76,7 +76,7 @@ class FederatedJobInfo(BaseModel):
     user_id: str = Field(..., description="User ID")
     model_version: int = Field(..., description="Model version")
     run_name: str = Field(..., description="Name of the run")
-    id: int = Field(..., description="Job ID")
+    id: str = Field(..., description="Job ID")  # Changed from int to str
     created_at: datetime = Field(..., description="When the job was created")
     model_name: str = Field(..., description="Name of the model")
     num_global_iterations: int = Field(..., description="Number of global iterations")
@@ -169,7 +169,7 @@ class FederatedJobFetcher:
             parent_run_info = RunInfo(
                 run_id=parent_run_id,
                 run_name=parent_run_name,
-                status=parent_run.info.lifecycle_stage,
+                status=parent_run.info.status,
                 start_time=start_time,
                 end_time=end_time,
                 duration=duration,
@@ -243,12 +243,12 @@ class FederatedJobFetcher:
                 user_id=client_email or "unknown",
                 model_version=1,
                 run_name=parent_run_name,
-                id=int(parent_run_id, 16) if parent_run_id.isalnum() else 0,  # Convert hex to int
+                id=parent_run_id,  # Convert hex to int
                 created_at=start_time or datetime.now(),
                 model_name=main_model.name,
                 num_global_iterations=total_rounds,
                 experiment_name=experiment.name,
-                status=parent_run.info.lifecycle_stage,
+                status=parent_run.info.status,
                 run=parent_run_info,
                 children_runs=child_runs,
                 model=main_model
@@ -303,7 +303,7 @@ class FederatedJobFetcher:
                 child_run_info = RunInfo(
                     run_id=run.info.run_id,
                     run_name=run.info.run_name or f"run_{run.info.run_id}",
-                    status=run.info.lifecycle_stage,
+                    status=run.info.status,
                     start_time=start_time,
                     end_time=end_time,
                     duration=duration,
@@ -835,7 +835,8 @@ class FederatedJobFetcher:
                     {"key": "trained", "value": "True"}
                 ],
                 "run_link": "",
-                "source_run": source_run
+                "source_run": source_run,
+                "model_id": getattr(logged_model, 'model_id', '') # Added model_id to version_info
             }
             
             return {
