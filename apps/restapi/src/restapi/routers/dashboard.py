@@ -112,7 +112,7 @@ def downgrade_user_from_admin(user_id: str, mlflow_username: str, user=Depends(g
 
 
 @router.post("/logout")
-def logout_(user_id: str, user=Depends(get_current_user_with_restricted_role(required_roles=["central_node_admin"]))):
+def logout_(user_id: str, user=Depends(get_current_user)):
     return logout_user(user_id)
 
 

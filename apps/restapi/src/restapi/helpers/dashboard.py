@@ -77,6 +77,11 @@ def create_user(
         password=data.password
     )
 
+    keycloak.update_user(
+        user_id=new_user.id,
+        update_data={"emailVerified": True}
+    )
+
     # Create user in MLflow using imported method
     mlflow_user = MLFlowUserCreateRequest(username=data.username, password=data.password)
     mlflow_create_user(mlflow_user)
