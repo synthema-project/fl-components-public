@@ -21,7 +21,7 @@ spec:
               "-m",
               "src.fl_server.main",
               "--superlink",
-              "flower-superlink:9092",
+              "flower-superlink:9091",
             ]
           env:
             - name: RABBIT_USERNAME

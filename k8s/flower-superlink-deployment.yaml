@@ -26,7 +26,11 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: 9092
+    - name: driver
+      port: 9091
+      targetPort: 9091
+    - name: fleet
+      port: 9092
       targetPort: 9092
   selector:
     app: flower-superlink
