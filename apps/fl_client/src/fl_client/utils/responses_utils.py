@@ -109,3 +109,15 @@ def create_start_p2p_server_response(
         configs_records={"config": configsrecord},
     )
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+def create_error_response(
+    msg: Message, error_message: str
+) -> Message:
+    configsrecord = ConfigsRecord(
+        {
+            "success": False,
+            "message": error_message,
+        }
+    )
+    rs = RecordSet(configs_records={"config": configsrecord})
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
