@@ -153,6 +153,7 @@ def filter_clients_if(msg: Message, global_vars: dict) -> Message:
 
 def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     config = recordset.read_discover_peers_recordset(msg.content)
+    logger.info(f"DISCOVER CONFIG → {config}") 
 
     discovery_service = peer_discovery.PeerDiscovery(
         client_id=global_vars["node_name"],
