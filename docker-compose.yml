@@ -66,6 +66,7 @@ services:
     environment:
       - MLFLOW_URL=http://mlflow
       - NODE_NAME=test1
+      - DISCOVERY_PORT=9876
       - DATA_PATH=/common/fl_models/iris/data.csv
     deploy:
       resources:
@@ -86,6 +87,7 @@ services:
     environment:
       - MLFLOW_URL=http://mlflow
       - NODE_NAME=test2
+      - DISCOVERY_PORT=9876
       - DATA_PATH=/common/fl_models/iris/data.csv
     deploy:
       resources:
@@ -106,6 +108,7 @@ services:
     environment:
       - MLFLOW_URL=http://mlflow
       - NODE_NAME=test3
+      - DISCOVERY_PORT=9876
       - DATA_PATH=/common/fl_models/iris/data.csv
     deploy:
       resources:

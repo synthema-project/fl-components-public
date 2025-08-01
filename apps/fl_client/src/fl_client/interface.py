@@ -1,17 +1,16 @@
-from flwr.common import Message, parameters_to_ndarrays, Parameters
 import threading
-import structlog
 from collections import OrderedDict
+from flwr.common import Message, parameters_to_ndarrays, Parameters
+import structlog
 from fl_models.iris.utils import Utils
 from flwr.common.differential_privacy import (
     compute_clip_model_update,
 )
+from interfaces import recordset
 from fl_client import stages
 from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
-from interfaces import recordset
 from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, split_model_parameters_to_shares, numpy_dict_to_torch_state_dict
-from fl_models.iris.utils import Utils
 
 logger = structlog.get_logger()
 
@@ -29,11 +28,9 @@ def prepare_data_if(msg: Message, global_vars: dict) -> Message:
     stages.prepare_data(global_vars)
     return responses_utils.create_success_response(msg, "prepared data successfully")
 
-
 def load_model_if(msg: Message, global_vars: dict) -> Message:
     stages.load_model(global_vars)
     return responses_utils.create_success_response(msg, "loaded model successfully")
-
 
 def upload_model_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters = recordset.read_upload_model_recordset(msg.content)
@@ -60,7 +57,7 @@ def train_model_fixed_clipping_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters, current_global_iter = recordset.read_train_model_recordset(
         msg.content
     )
-    # Convert parameters from server to client in ndarrays 
+    # Convert parameters from server to client in ndarrays
     server_to_client_params_dict = Utils.parameters_to_dict(latest_parameters)
     server_to_client_params = list(server_to_client_params_dict.values())
 
@@ -86,8 +83,6 @@ def train_model_fixed_clipping_if(msg: Message, global_vars: dict) -> Message:
         clipped_params[key] = value
 
     clipped_parameters=Utils.dict_to_parameter_record(clipped_params)
-   
-
     return responses_utils.create_train_response(msg, clipped_parameters, metrics)
 
 def train_model_SMPC_if(msg: Message, global_vars: dict) -> Message:
@@ -114,17 +109,14 @@ def train_model_SMPC_if(msg: Message, global_vars: dict) -> Message:
     parameter_record = Utils.pytorch_to_parameter_record(latest_parameters)
     return responses_utils.create_train_response(msg, parameter_record, metrics)
 
-
 def get_parameters_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters = stages.get_model_parameters(global_vars)
     return responses_utils.create_parameters_response(msg, latest_parameters)
-
 
 def set_parameters_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters = recordset.read_set_parameters_recordset(msg.content)
     stages.set_model_parameters(latest_parameters, global_vars)
     return responses_utils.create_success_response(msg, "set parameters successfully")
-
 
 def set_run_config_if(msg: Message, global_vars: dict) -> Message:
     content = recordset.read_set_run_cfg_recordset(msg.content)
@@ -138,11 +130,9 @@ def set_run_config_if(msg: Message, global_vars: dict) -> Message:
     )
     return responses_utils.create_success_response(msg, "set run config successfully")
 
-
 def clean_config_if(msg: Message) -> Message:
     stages.clean_current_config()
     return responses_utils.create_success_response(msg, "cleaned config successfully")
-
 
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
     use_case = recordset.read_filter_clients_recordset(msg.content)
@@ -150,10 +140,9 @@ def filter_clients_if(msg: Message, global_vars: dict) -> Message:
         return responses_utils.create_participate_response(msg, True)
     return responses_utils.create_participate_response(msg, False)
 
-
 def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     config = recordset.read_discover_peers_recordset(msg.content)
-    logger.info(f"DISCOVER CONFIG → {config}") 
+    logger.info(f"DISCOVER CONFIG → {config}")
 
     discovery_service = peer_discovery.PeerDiscovery(
         client_id=global_vars["node_name"],
