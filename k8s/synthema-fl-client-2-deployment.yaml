@@ -30,7 +30,7 @@ spec:
             - name: DATA_PATH
               value: /common/fl_models/iris/data.csv
             - name: DISCOVERY_PORT
-              value: 9876
+              value: "9876"
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

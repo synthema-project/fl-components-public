@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Constants for discovery
-DISCOVERY_PORT = os.environ.get('DISCOVERY_PORT', 9876) #9876
+DISCOVERY_PORT = int(os.environ.get('DISCOVERY_PORT', "9876")) # default to 9876
 DISCOVERY_BROADCAST_ADDR = '<broadcast>'
 DISCOVERY_INTERVAL = 3  # seconds
 DISCOVERY_TIMEOUT = 30  # seconds
