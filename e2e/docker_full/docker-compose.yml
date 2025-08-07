@@ -58,6 +58,8 @@ services:
   
   synthema-fl-server:
     image: synthema-fl-server:test
+    ports:
+      - 9091:9091 # FL server port
     container_name: synthema-fl-server
     command: ["python", "-m", "src.fl_server.main", "--superlink", "flower-superlink:9091"]
     depends_on:

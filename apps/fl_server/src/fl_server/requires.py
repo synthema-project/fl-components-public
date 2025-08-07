@@ -1,6 +1,6 @@
 from random import choice
 from typing import Callable
-
+import structlog
 from flwr.common import (
     DEFAULT_TTL,
     MessageType,
@@ -14,7 +14,7 @@ from fl_server import stages
 from fl_server.utils import driver_utils, requires_utils
 
 import interfaces.recordset
-
+logger = structlog.get_logger()
 
 def execution_flow(
     driver: Driver,
@@ -153,6 +153,24 @@ def set_run_config(
     )
 
 
+def set_dp_config(
+    driver: Driver,
+    node_ids: list[int],
+    dp_mode: str,
+    noise_multiplier: int,
+    clipping_norm: int
+) -> None:
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_set_dp_cfg_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="set_dp_config",
+        recordset_factory_args=(dp_mode, clipping_norm,noise_multiplier),
+        check_success=True,
+    )
+
+
 def train_model(
     driver: Driver,
     node_ids: list[int],
@@ -177,6 +195,21 @@ def train_model(
         for msg in all_replies
     ]
 
+def set_SMPC_enabled(
+    driver: Driver,
+    node_ids: list[int],
+    smpc_enabled: bool,
+) -> None:
+    execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_set_smpc_enabled_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="set_smpc_enabled",
+        recordset_factory_args=(smpc_enabled,),
+        check_success=True,
+    )
+
 
 def clean_config(
     driver: Driver,
@@ -190,3 +223,65 @@ def clean_config(
         msg_group="clean_config",
         check_success=True,
     )
+
+## Require P2P established
+def start_P2P_server(driver: Driver,
+    node_ids: list[int],
+    port: int
+) -> None:
+# server needs to notify the client to start establishing the P2P network
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_start_P2P_server_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="start_P2P_server",
+        recordset_factory_args=(node_ids, port),
+        check_success=True,
+    )
+
+    return [
+        msg.content.configs_records['config']['grpc_port']
+        for msg in all_replies
+    ]
+
+def discover_peers(
+    driver: Driver,
+    node_ids: list[int],
+    client_port: int,
+    max_discovery_time: int = 60
+) -> None:
+    # returns list of peers discovered by each client node
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_discover_peers_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="discover_peers",
+        recordset_factory_args=(node_ids, client_port, max_discovery_time),
+        check_success=True,
+    )
+
+    return [
+        msg.content.configs_records['config']['peers']
+        for msg in all_replies
+    ]
+
+def connect_peers(
+    driver: Driver,
+    node_ids: list[int],
+    peers: list[list[str]]
+) -> None:
+    all_replies = []
+    for i, node_id in enumerate(node_ids):
+        partial_replies = execution_flow(
+            driver=driver,
+            node_ids=[node_id],
+            recordset_factory=interfaces.recordset.create_connect_peers_recordset,
+            msg_type=MessageType.QUERY,
+            msg_group="connect_peers",
+            recordset_factory_args=([node_id], peers[i]),
+        )
+        all_replies.extend(partial_replies)
+
+    return [msg.content.configs_records['config']['peers'] for msg in all_replies]
