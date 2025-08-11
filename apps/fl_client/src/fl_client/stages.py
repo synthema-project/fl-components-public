@@ -104,12 +104,12 @@ def upload_model(
 def clean_current_config() -> None:
     mlflow_client.clean_current_config()
 
-def start_P2P_server(client_id: int, port: int, global_vars: dict) -> None:
+def start_P2P_server(client_id: int, port: int, global_vars: dict) -> SMPCClient:
     smpc_client = SMPCClient(client_id, port)
     global_vars["smpc_client"] = smpc_client
     return smpc_client
 
-def set_discovered_peers(discovered_peers: List, discovered_peers_ids: List[str], global_vars: dict) -> dict[str, str]:
+def set_discovered_peers(discovered_peers: List[str], discovered_peers_ids: List[str], global_vars: dict) -> List[str]:
     global_vars['discovered_peers'] = discovered_peers
     global_vars['discovered_peers_ids'] = discovered_peers_ids
     return discovered_peers
@@ -125,7 +125,7 @@ def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
     return peer_stubs
 
 def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
-                         peer_stubs: Dict[str, any],
+                         peer_stubs: Dict[str, Any],
                          client_id: str):
     """
     Sends secret shares to all peer clients.
@@ -201,4 +201,3 @@ def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     except TimeoutError as e:
         logger.error(f"Client {smpc_client.client_id} failed to receive all shares: {e}")
         return None
-
