@@ -68,15 +68,16 @@ _configured = MutableBoolean(False)
 _current_config = __Config
 _mlflow_client = cast(MlflowClient, None)
 
-def get_token():
+#Token workflow only compatible if MLFlow OIDC plugin is active
+def fetch_keycloak_token():
     response = requests.post(
-        "https://identity.gatv.es/realms/synthia/protocol/openid-connect/token",
+        f'{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_SERVER_REALM}/openid-connect/token',
         data={
-            "client_id": "mlflow",
-            "client_secret": "gEO9IILpcUy8Rr8B4md1EYfiqbvqLwpD",
+            "client_id": KEYCLOAK_CLIENT_ID,
+            "client_secret": KEYCLOAK_CLIENT_SECRET,
             "grant_type": "password",
-            "username": "santibl",
-            "password": "gatvgatv"
+            "username": MLFLOW_SERVICE_ACCOUNT_USERNAME,
+            "password": MLFLOW_SERVICE_ACCOUNT_PASSWORD
         },
     )
     response.raise_for_status()
@@ -95,12 +96,9 @@ def setup_mlflow(tracking_url: str, is_central_node: bool = False) -> None:
     _current_config.is_central_node = is_central_node
     mlflow.set_tracking_uri(tracking_url)
 
-    # Fetch token
-    token = get_token()
-    os.environ["MLFLOW_TRACKING_TOKEN"] = token
-
-    # Initialize MLflowClient without headers (it will use the env var)
-    _mlflow_client = MlflowClient(tracking_url)
+    # # Fetch token
+    # token = get_token()
+    # os.environ["MLFLOW_TRACKING_TOKEN"] = token
 
     # Initialize MLflowClient with authentication
     _mlflow_client = MlflowClient(tracking_uri=tracking_url)

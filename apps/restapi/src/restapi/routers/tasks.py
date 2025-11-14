@@ -9,8 +9,8 @@ from restapi import config
 from interfaces.rabbitmq_client import AsyncRabbitMQClient
 from schemas.task import TaskCreate, TaskRead, TaskStatus
 
-#from restapi.auth import verify_token, verify_token_and_role
 from restapi.auth import get_current_user, get_current_user_with_restricted_role
+from config import KEYCLOAK_ROLE_NAME_PLATFORM_ADMIN
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -110,7 +110,7 @@ async def delete_task(
 
 @router.delete("/")
 async def delete_all_tasks(session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user_with_restricted_role(required_roles=["central_node_admin"])),
+    user = Depends(get_current_user_with_restricted_role(required_roles=[KEYCLOAK_ROLE_NAME_PLATFORM_ADMIN])),
 ) -> Response:
     await session.execute(delete(TaskRead))
     await session.commit()
