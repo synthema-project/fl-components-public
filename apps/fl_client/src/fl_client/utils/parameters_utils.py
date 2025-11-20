@@ -82,7 +82,7 @@ def deserialize_parameters(serialized):
         parameters[name] = array
     return parameters
 
-def generate_value_secret_share(value: float, num_shares: int = 3) -> List[np.ndarray]:
+def generate_value_secret_share(value: float, num_shares: int = 3) -> List[float]:
     """
     Generates secret shares of a given value using additive secret sharing.
 
@@ -90,12 +90,12 @@ def generate_value_secret_share(value: float, num_shares: int = 3) -> List[np.nd
     The shares are randomly generated, except for the last share, which is determined so that the sum of 
     all shares equals the original value.
 
-    Parameters:
-    value (float): The value to be secret-shared.
-    num_shares (int): The number of shares to split the value into. Default is 3.
+    Args:
+        value (float): The value to be secret-shared.
+        num_shares (int): The number of shares to split the value into. Default is 3.
 
     Returns:
-    list: A list of secret shares (floating-point numbers).
+        list: A list of secret shares (floating-point numbers).
     """
     shares = [np.random.uniform(-1, 1) for _ in range(num_shares - 1)]
     last_share = value - sum(shares)

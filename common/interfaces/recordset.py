@@ -246,7 +246,7 @@ def create_connect_peers_recordset(node_ids: list[int], peers: list[list[str]]) 
         {
             "mode": "connect_peers",
             "node_ids": node_ids,
-            "peers": peers
+            "peers": peers # type: ignore
         }
     )
     return RecordSet(configs_records={"config": configsrecord})
