@@ -1,7 +1,9 @@
 from flwr.client import ClientApp
 from flwr.common import Context, Message
-
+import structlog
 from fl_client.config import MLFLOW_URL, NODE_NAME, DATA_PATH
+
+logger = structlog.get_logger()
 from fl_client.interface import (
     clean_config_if,
     filter_clients_if,
@@ -11,8 +13,15 @@ from fl_client.interface import (
     prepare_data_if,
     set_parameters_if,
     set_run_config_if,
+    train_model_fixed_clipping_if,
     train_model_if,
     upload_model_if,
+    get_peer_discovery_if,
+    connect_peers_if,
+    start_P2P_server_if,
+    train_model_SMPC_if,
+    set_smpc_enabled_if,
+    set_dp_config_if
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -25,11 +34,17 @@ global_vars = {
     "use_case": "iris",
     "node_name": NODE_NAME,
     "data_path": DATA_PATH,
+    "SMPC_enabled": False,
+    "peers": None,
+    "peer_stubs": None,
+    "smpc_client": None,
+    "discovered_peers": None,
+    "discovered_peers_ids": None,
+    "dp_config": None
 }
 
 setup_mlflow(MLFLOW_URL)
 app = ClientApp()
-
 
 @app.query()
 def query(msg: Message, ctx: Context) -> Message:
@@ -57,6 +72,11 @@ def query(msg: Message, ctx: Context) -> Message:
     elif mode == "set_run_config":
         return set_run_config_if(msg, global_vars)
 
+    elif mode == "set_smpc_enabled":
+        return set_smpc_enabled_if(msg, global_vars)
+    elif mode == "set_dp_config":
+        return set_dp_config_if(msg, global_vars)
+
     elif mode == "prepare_data":
         return prepare_data_if(msg, global_vars)
 
@@ -65,7 +85,15 @@ def query(msg: Message, ctx: Context) -> Message:
 
     elif mode == "clean_config":
         return clean_config_if(msg)
-
+    # start grpc server for all clients
+    elif mode == "start_P2P_server":
+        return start_P2P_server_if(msg, global_vars)
+    elif mode == "discover_peers":
+        return get_peer_discovery_if(msg, global_vars)
+    # P2P network connection
+    elif mode == "connect_peers":
+        # returns the peers and peer_stubs
+        return connect_peers_if(msg, global_vars)
     else:
         raise NotImplementedError(f"Unknown mode: {mode}")
 
@@ -73,7 +101,22 @@ def query(msg: Message, ctx: Context) -> Message:
 @app.train()
 def train(msg: Message, ctx: Context) -> Message:
     global global_vars
-    return train_model_if(msg, global_vars)
+
+    dp_config = global_vars.get("dp_config")
+    smpc_enabled = global_vars.get("SMPC_enabled", False)
+
+    # Check for incompatible configuration
+    if dp_config and dp_config.get("dp_mode") == "central_dp" and smpc_enabled:
+        raise RuntimeError("Cannot use both SMPC and DP in central_dp mode. Please disable one of them.")
+
+    # Route to appropriate training function
+    if smpc_enabled:
+        logger.info("Training with SMPC enabled")
+        return train_model_SMPC_if(msg, global_vars)
+    elif dp_config and dp_config.get("dp_mode") == "central_dp":
+        return train_model_fixed_clipping_if(msg, global_vars)
+    else:
+        return train_model_if(msg, global_vars)
 
 
 @app.evaluate()

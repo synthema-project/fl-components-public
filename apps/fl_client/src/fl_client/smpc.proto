@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package smpc;
+
+service SMPC {
+    rpc SendShares (SharesRequest) returns (AckResponse) {}
+}
+
+message Share {
+    string name = 1;
+    bytes data = 2;
+    repeated int32 shape = 3;
+}
+
+message SharesRequest {
+    string client_id = 1;
+    repeated Share shares = 2;
+}
+
+message AckResponse {
+    string status = 1;
+}
