@@ -6,9 +6,9 @@ from flwr.server import Driver, ServerApp
 
 from fl_server import requires, stages, config
 from fl_server.utils import mlflow_utils
-from interfaces import mlflow_client
-from schemas.task import TaskRead
-from interfaces.rabbitmq_client import AsyncRabbitMQClient
+from fl_server.interfaces import mlflow_client
+from fl_server.schemas.task import TaskRead
+from fl_server.interfaces.rabbitmq_client import AsyncRabbitMQClient
 
 logger = structlog.get_logger()
 

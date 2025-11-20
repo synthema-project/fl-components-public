@@ -37,4 +37,3 @@ def create_app() -> FastAPI:
 
 # FastAPI app entrypoint for Uvicorn
 app = create_app()
-  # Adds OpenAPI support
