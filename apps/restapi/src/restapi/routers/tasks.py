@@ -9,7 +9,7 @@ from restapi import config
 from interfaces.rabbitmq_client import AsyncRabbitMQClient
 from schemas.task import TaskCreate, TaskRead, TaskStatus
 
-from restapi.auth import get_current_user, get_current_user_with_restricted_role
+from restapi.auth import UserClaims, require_authentication
 from config import KEYCLOAK_ROLE_NAME_PLATFORM_ADMIN
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -29,7 +29,7 @@ async def get_rabbitmqs() -> dict[str, AsyncRabbitMQClient]:
 @router.get("/", response_model=list[TaskRead])
 async def get_tasks_all(
     session: AsyncSession = Depends(get_session),
-    user: dict = Depends(get_current_user),
+    current_user: UserClaims = Depends(require_authentication),
 ) -> Sequence[TaskRead]:
     result = await session.execute(select(TaskRead))
     return result.scalars().all()
@@ -38,7 +38,7 @@ async def get_tasks_all(
 @router.get("/{task_id}", response_model=TaskRead)
 async def get_task_by_id(
     task_id: int, session: AsyncSession = Depends(get_session),
-    user: dict = Depends(get_current_user),
+    current_user: UserClaims = Depends(require_authentication),
 ) -> JSONResponse | TaskRead:
     task = await session.get(TaskRead, task_id)
     if not task:
@@ -49,7 +49,7 @@ async def get_task_by_id(
 @router.get("/user/{user_id}", response_model=list[TaskRead])
 async def get_tasks_by_user(
     user_id: str, session: AsyncSession = Depends(get_session),
-    user: dict = Depends(get_current_user),
+    current_user: UserClaims = Depends(require_authentication),
 ) -> Sequence[TaskRead]:
     result = await session.execute(select(TaskRead).where(TaskRead.user_id == user_id))
     return result.scalars().all()
@@ -87,7 +87,7 @@ async def cancel_task(
     task_id: int,
     session: AsyncSession = Depends(get_session),
     rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
-    user: dict = Depends(get_current_user),
+    current_user: UserClaims = Depends(require_authentication),
 ) -> TaskRead | Response:
 
     task = await session.get(TaskRead, task_id)
@@ -104,7 +104,7 @@ async def cancel_task(
 @router.delete("/{task_id}")
 async def delete_task(
     task_id: int, session: AsyncSession = Depends(get_session),
-    user: dict = Depends(get_current_user),
+    current_user: UserClaims = Depends(require_authentication),
 ) -> Response:
     task = await session.get(TaskRead, task_id)
     if not task:
@@ -117,8 +117,10 @@ async def delete_task(
 
 @router.delete("/")
 async def delete_all_tasks(session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user_with_restricted_role(required_roles=[KEYCLOAK_ROLE_NAME_PLATFORM_ADMIN])),
+    current_user: UserClaims = Depends(require_authentication),
 ) -> Response:
+    if not current_user.has_role("Admin"):
+        raise HTTPException(status_code=403, detail="No permissions to access this endpoint")
     await session.execute(delete(TaskRead))
     await session.commit()
     return JSONResponse({"message": "All tasks deleted"})
