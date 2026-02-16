@@ -10,6 +10,7 @@ from fl_client.config import DATA_PATH_AML
 from interfaces import mlflow_client
 from fl_client.SMPCClient import SMPCClient
 from fl_client import smpc_pb2
+from fl_client.utils.minio_loader import download_object
 
 logger = structlog.get_logger()
 def set_run_config(
@@ -31,13 +32,26 @@ def set_run_config(
     mlflow_client.set_dataset_signature(node_name, data_path, child_run_id)
 
 
-def load_data(use_case: str, global_vars: dict) -> None:
-    if use_case != "iris" or use_case != "AML":
-        raise NotImplementedError(f"Unknown use case: {use_case}")
-    if use_case == "iris":
-        global_vars["data"] = pd.read_csv(DATA_PATH)
-    if use_case == "AML":
-        global_vars["data"] = pd.read_csv(DATA_PATH_AML)
+def load_data(
+    use_case: str,
+    dataset_paths: list[str],
+    global_vars: dict,
+):
+    if not dataset_paths:
+    raise ValueError(
+        f"No dataset paths received for node {global_vars['node_name']}"
+    )
+
+    dataframes = []
+
+    for object_path in dataset_paths:
+        local_file = download_object(object_path)
+        df = pd.read_csv(local_file)
+        dataframes.append(df)
+
+    dataset = pd.concat(dataframes, ignore_index=True)
+
+    global_vars["dataset"] = dataset
     global_vars["use_case"] = use_case
 
 
