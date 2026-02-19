@@ -1,9 +1,8 @@
 import enum
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Self
 from sqlmodel import SQLModel, Field, Column, Enum
 from pydantic import BaseModel, model_validator
-from typing import Optional
 
 
 class Status(str, enum.Enum):
@@ -39,7 +38,7 @@ class TaskRead(TaskBase, table=True):
     created_at: datetime = Field(default_factory=datetime.now, nullable=False)
 
     @model_validator(mode='after')
-    def validate_security_protocol(self):
+    def validate_security_protocol(self) -> Self:
         if self.dp_mode == "None":
             self.dp_mode = None
         if self.dp_mode not in (None, "central_dp", "local_dp"):
