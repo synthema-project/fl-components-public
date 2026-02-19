@@ -20,9 +20,14 @@ def set_dp_config_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_success_response(msg, "set dp config successfully")
 
 def load_data_if(msg: Message, global_vars: dict) -> Message:
-    use_case = recordset.read_load_data_recordset(msg.content)
-    stages.load_data(use_case, global_vars)
-    return responses_utils.create_success_response(msg, "loaded data successfully")
+    use_case, dataset_paths = recordset.read_load_data_recordset(msg.content)
+
+    stages.load_data(use_case, dataset_paths, global_vars)
+
+    return responses_utils.create_success_response(
+        msg, "loaded data successfully"
+    )
+
 
 def prepare_data_if(msg: Message, global_vars: dict) -> Message:
     stages.prepare_data(global_vars)
