@@ -17,23 +17,44 @@ import interfaces.recordset
 logger = structlog.get_logger()
 
 def execution_flow(
-    driver: Driver,
-    node_ids: list[int],
-    recordset_factory: Callable,
-    msg_type: str,
-    msg_group: str,
-    recordset_factory_args: tuple = (),
-    check_success: bool = False,
-) -> list[Message]:
-    recordset = recordset_factory(*recordset_factory_args)
-    messages = driver_utils.create_messages(
-        driver, recordset, msg_type, node_ids, msg_group, DEFAULT_TTL
-    )
-    message_ids = driver_utils.send_messages(driver, messages)
-    all_replies = driver_utils.wait_messages(driver, message_ids)
+    driver,
+    node_ids,
+    msg_type,
+    msg_group,
+    check_success=True,
+    recordset_factory=None,
+    recordset_factory_args=None,
+    per_node_recordset_factory=None,
+):
+    messages = []
+
+    for node_id in node_ids:
+
+        # NEW LOGIC: per-node factory has priority
+        if per_node_recordset_factory is not None:
+            recordset = per_node_recordset_factory(node_id)
+
+        else:
+            recordset = recordset_factory(*recordset_factory_args)
+
+        message = driver_utils.create_message(
+            driver=driver,
+            node_id=node_id,
+            recordset=recordset,
+            msg_type=msg_type,
+            msg_group=msg_group,
+        )
+
+        messages.append(message)
+
+    driver_utils.send_messages(driver, messages)
+
+    replies = driver_utils.wait_messages(driver, messages)
+
     if check_success:
-        requires_utils.check_success_clients(all_replies)
-    return all_replies
+        driver_utils.check_replies_success(replies)
+
+    return replies
 
 
 def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[int]:
@@ -49,17 +70,28 @@ def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[i
     return filtered_node_ids
 
 
-def load_data(driver: Driver, node_ids: list[int], use_case: str) -> None:
+def load_data(driver, node_ids: list[int], use_case: str):
+
+    catalogue_client = DataCatalogueClient(
+        base_url=DATA_CATALOGUE_URL
+    )
+
+    node_dataset_map = catalogue_client.get_use_case_datasets(use_case)
+
+    def per_node_recordset_factory(node_id: int):
+        node_name = f"NODE{node_id}"
+        dataset_paths = node_dataset_map.get(node_name, [])
+
+        return create_load_data_recordset(use_case, dataset_paths)
+
     execution_flow(
         driver=driver,
         node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_load_data_recordset,
         msg_type=MessageType.QUERY,
         msg_group="load_data",
-        recordset_factory_args=(use_case,),
+        per_node_recordset_factory=per_node_recordset_factory,
         check_success=True,
     )
-
 
 def prepare_data(driver: Driver, node_ids: list[int]) -> None:
     execution_flow(

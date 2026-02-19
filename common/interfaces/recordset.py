@@ -13,23 +13,39 @@ def read_filter_clients_recordset(recordset: RecordSet) -> str:
     return use_case
 
 
-def create_load_data_recordset(use_case: str) -> RecordSet:
+def create_load_data_recordset(
+    use_case: str,
+    dataset_paths: list[str],
+) -> RecordSet:
+
     configsrecord = ConfigsRecord(
         {
             "mode": "load_data",
             "use_case": use_case,
+            "dataset_paths": dataset_paths,
         }
     )
+
     return RecordSet(
         configs_records={"config": configsrecord},
     )
 
 
-def read_load_data_recordset(recordset: RecordSet) -> str:
-    use_case = recordset.configs_records["config"]["use_case"]
+def read_load_data_recordset(recordset: RecordSet) -> tuple[str, list[str]]:
+    config = recordset.configs_records["config"]
+
+    use_case = config["use_case"]
+    dataset_paths = config.get("dataset_paths", [])
+
     if not isinstance(use_case, str):
         raise TypeError(f"use_case must be a string, received {type(use_case)}")
-    return use_case
+
+    if not isinstance(dataset_paths, list):
+        raise TypeError(
+            f"dataset_paths must be a list, received {type(dataset_paths)}"
+        )
+
+    return use_case, dataset_paths
 
 
 def create_prepare_data_recordset() -> RecordSet:

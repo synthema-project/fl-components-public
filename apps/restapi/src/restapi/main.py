@@ -17,7 +17,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router)
     app.include_router(mlflow.router)
     app.include_router(mlflow.router_admin)
-    app.include_router(keycloak_admin.router)
+    # app.include_router(keycloak_admin.router)
 
 
     app.add_middleware(

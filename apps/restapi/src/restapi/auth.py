@@ -1,171 +1,91 @@
-from fastapi import Depends, HTTPException, status, APIRouter
-from fastapi.security import OAuth2AuthorizationCodeBearer
-from restapi import config
-from fastapi_keycloak import FastAPIKeycloak
-import requests
+import os
+from typing import List
+from keycloak import KeycloakOpenID
+from pydantic import BaseModel, Field
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jwcrypto.jws import InvalidJWSSignature, InvalidJWSObject
+from jwcrypto.jwt import JWTExpired
+from typing import Optional, Annotated
+from fastapi import Depends, HTTPException, status
 
 
-# Keycloak Configuration
 
-KEYCLOAK_SERVER_URL = config.KEYCLOAK_SERVER_URL
-KEYCLOAK_CLIENT_ID = config.KEYCLOAK_CLIENT_ID
-KEYCLOAK_CLIENT_SECRET = config.KEYCLOAK_CLIENT_SECRET
-KEYCLOAK_REALM_NAME = config.KEYCLOAK_REALM_NAME
-KEYCLOAK_REDIRECT_URI = config.KEYCLOAK_REDIRECT_URI
-KEYCLOAK_ADMIN_CLIENT_SECRET = config.KEYCLOAK_ADMIN_CLIENT_SECRET
-KEYCLOAK_AUTHORIZED_GROUP = config.KEYCLOAK_AUTHORIZED_GROUP
-KEYCLOAK_AUTHORIZED_ROLE = config.KEYCLOAK_AUTHORIZED_ROLE
+#KEYCLOAK_SERVER_URL=os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
+#KEYCLOAK_CLIENT_ID=os.getenv("KEYCLOAK_CLIENT_ID", "synthema")
+#KEYCLOAK_REALM=os.getenv("KEYCLOAK_REALM", "Synthema")
 
-# Initialize Keycloak Authentication
-keycloak = FastAPIKeycloak(
-    server_url=KEYCLOAK_SERVER_URL,
-    client_id=KEYCLOAK_CLIENT_ID,
-    client_secret=KEYCLOAK_CLIENT_SECRET,
-    admin_client_id="admin-client",
-    admin_client_secret="pqEnP3qqjaTq7Ux1qEoZ6jjF93cH7qx6",
-    realm=KEYCLOAK_REALM_NAME,
-    callback_uri=KEYCLOAK_REDIRECT_URI
-)
+KEYCLOAK_SERVER_URL="https://users.k8s.synthema.rid-intrasoft.eu"#os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
+KEYCLOAK_CLIENT_ID="synthema"#os.getenv("KEYCLOAK_CLIENT_ID", "synthema")
+KEYCLOAK_REALM="Synthema"#os.getenv("KEYCLOAK_REALM", "Synthema")
 
-# OAuth2 Configuration
-oauth2_scheme = OAuth2AuthorizationCodeBearer(
-    tokenUrl=f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token",
-    authorizationUrl=f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/auth"
-)
-# Function to Verify Token
-def get_current_user(token: str = Depends(oauth2_scheme)):
+keycloak_openid = KeycloakOpenID(server_url=KEYCLOAK_SERVER_URL,
+                                 client_id=KEYCLOAK_CLIENT_ID,
+                                 realm_name=KEYCLOAK_REALM)
+
+class UserClaims(BaseModel):
+    exp: int
+    iat: int
+    jti: str
+    iss: str
+    sub: str
+    typ: str
+    azp: str
+    session_state: str
+    scope: str
+    sid: str
+    synthema_roles: List[str] = Field(alias="synthemaRoles", default_factory=list)
+    name: str = Field(alias="firstName")
+    last_name: str = Field(alias="lastName")
+    username: str
+
+    def has_organization_role(self, organization, role) -> bool:
+        for syn_role in self.synthema_roles:
+            org, rol = syn_role.split(":")
+            if role == rol and organization == org:
+                return True
+
+        return False
+
+    def has_role(self, role) -> bool:
+        for syn_role in self.synthema_roles:
+            org, rol = syn_role.split(":")
+            if role == rol:
+                return True
+
+        return False
+
+oauth2_scheme = HTTPBearer()
+
+def get_user_data_from_token(token: str) -> UserClaims:
+    decoded_token = keycloak_openid.decode_token(token,
+                                                 #key=public_key,
+                                                 validate=True
+                                                )
+    user_claims = UserClaims(**decoded_token)
+    return user_claims
+
+
+async def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depends(oauth2_scheme)]) -> UserClaims:
+    token = credentials.credentials
     try:
-        user_info = keycloak.get_current_user()
-        return user_info
-    except Exception:
-        raise HTTPException(status_code=401, detail="User unauthorized")
+        user = get_user_data_from_token(token)
+    except (JWTExpired, InvalidJWSSignature, InvalidJWSObject):
+        user = None
 
-# Function to Verify Token
-def get_current_user_with_restricted_role(token: str = Depends(oauth2_scheme), required_roles = ["ai_practitioner"]):
-    try:
-        # required_roles = "ai_practitioner"
-        user_info = keycloak.get_current_user(required_roles=required_roles)
-        # print(f"User info: {user_info}")
-        return user_info
-    except Exception as e:
-        # print(f"Auth failed: {str(e)}")
-        raise HTTPException(status_code=401, detail="User unauthorized, please verify you have the correct role")
-
-
-def get_admin_token():
-    token_url = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
-    data = {
-        "grant_type": "password",
-        "client_id": "admin-cli",
-        "username": "santibl",
-        "password": "gatvgatv",
-    }
-
-    response = requests.post(token_url, data=data)
-    if not response.ok:
+    if not user:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get token from Keycloak: {response.text}"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    print(response.json())
-    return response.json()
-
-# def get_admin_token():
-#     url = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
-#     data = {
-#         "client_id": "admin-cli",
-#         "client_secret": "pqEnP3qqjaTq7Ux1qEoZ6jjF93cH7qx6",
-#         "grant_type": "client_credentials"
-#     }
-#     response = requests.post(url, data=data)
-#     response.raise_for_status()
-#     return response.json()
+    return user
 
 
-def logout_user(user_id: str):
-    token = get_admin_token()["access_token"]
-    url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}/logout"
-    response = requests.post(url, headers={"Authorization": f"Bearer {token}"})
-    response.raise_for_status()
-    return {"message": "User logged out"}
-
-def assign_realm_role_to_user(user_id: str, role_name: str):
-    token = get_admin_token()["access_token"]
-
-    # Get the role from realm
-    role_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/roles/{role_name}"
-    role = requests.get(role_url, headers={"Authorization": f"Bearer {token}"}).json()
-
-    # Assign role
-    assign_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}/role-mappings/realm"
-    response = requests.post(assign_url, json=[role], headers={"Authorization": f"Bearer {token}"})
-    response.raise_for_status()
-    return {"message": f"Role '{role_name}' assigned to user"}
-
-def remove_realm_role_from_user(user_id: str, role_name: str):
-    token = get_admin_token()["access_token"]
-
-    # Get the role
-    role_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/roles/{role_name}"
-    role = requests.get(role_url, headers={"Authorization": f"Bearer {token}"}).json()
-
-    # Remove role
-    remove_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}/role-mappings/realm"
-    response = requests.delete(remove_url, json=[role], headers={"Authorization": f"Bearer {token}"})
-    response.raise_for_status()
-    return {"message": f"Role '{role_name}' removed from user"}
-
-def update_user_names(user_id: str, first_name: str, last_name: str):
-    token = get_admin_token()["access_token"]
-    update_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}"
-    payload = {
-        "firstName": first_name,
-        "lastName": last_name
-    }
-    response = requests.put(update_url, json=payload, headers={"Authorization": f"Bearer {token}"})
-    response.raise_for_status()
-    return {"message": "User name updated"}
-
-def upgrade_user_to_admin_keycloak(user_id: str):
-    token = get_admin_token()["access_token"]
-
-    # Get the 'admin' role object
-    role = requests.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/roles/admin",
-        headers={"Authorization": f"Bearer {token}"}
-    ).json()
-
-    # Assign role
-    assign_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}/role-mappings/realm"
-    resp = requests.post(assign_url, json=[role], headers={"Authorization": f"Bearer {token}"})
-    resp.raise_for_status()
-    return {"message": f"User {user_id} upgraded to admin in Keycloak"}
-
-def downgrade_user_from_admin_keycloak(user_id: str):
-    token = get_admin_token()["access_token"]
-
-    role = requests.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/roles/admin",
-        headers={"Authorization": f"Bearer {token}"}
-    ).json()
-
-    remove_url = f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/users/{user_id}/role-mappings/realm"
-    resp = requests.delete(remove_url, json=[role], headers={"Authorization": f"Bearer {token}"})
-    resp.raise_for_status()
-    return {"message": f"User {user_id} downgraded from admin in Keycloak"}
-
-
-def get_group_members(group_id: str, brief_representation: bool = False):
-    token = get_admin_token()["access_token"]
-
-    url = (
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{KEYCLOAK_REALM_NAME}/groups/{group_id}/members"
-        f"?briefRepresentation={'true' if brief_representation else 'false'}"
-    )
-
-    response = requests.get(url, headers={"Authorization": f"Bearer {token}"})
-    response.raise_for_status()
-
-    return response.json()
-
-
+async def require_authentication(current_user: Optional[UserClaims] = Depends(get_current_user)):
+    """Require user to be authenticated"""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required"
+        )
+    return current_user
