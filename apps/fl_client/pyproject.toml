@@ -20,7 +20,8 @@ psutil = "^6.0.0"
 model-store-interface = {version = "0.3.0", extras = ["edge"]}
 grpcio-tools = "^1.62.0"
 structlog = "^25.1.0"
-minio = "^7.2.0"
+minio = "^7.2.20"
+
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"
