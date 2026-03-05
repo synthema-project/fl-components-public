@@ -4,8 +4,8 @@ import structlog
 from fl_server import config
 from fl_server.app import get_serverapp
 from fl_server.utils.app_utils import run_server_app
-from interfaces import rabbitmq_client, mlflow_client
-from schemas.task import TaskRead, TaskStatus, Status
+from fl_server.interfaces import rabbitmq_client, mlflow_client
+from fl_server.schemas.task import TaskRead, TaskStatus, Status
 
 logger = structlog.get_logger()
 

@@ -1,4 +1,4 @@
-from interfaces.mlflow_client import create_child_run, create_parent_run
+from fl_server.interfaces.mlflow_client import create_child_run, create_parent_run
 
 
 def create_mlflow_runs(run_name: str, experiment_name: str) -> tuple[str, str, str]:
