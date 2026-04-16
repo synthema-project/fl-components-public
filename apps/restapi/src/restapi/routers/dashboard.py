@@ -83,17 +83,17 @@ async def get_task_by_id_(task_id : int, session: AsyncSession = Depends(get_ses
 
 @router.post("/create/user")
 async def create_user_(data: CreateUserRequest, current_user: UserClaims = Depends(require_authentication)):
-    new_user = create_user(data, user)
+    new_user = create_user(data, current_user)
     return {"user": new_user}
 
 @router.delete("/delete/user/{username}")
 async def delete_user_(username: str, current_user: UserClaims = Depends(require_authentication)):
-    delete_user(username, user)
+    delete_user(username, current_user)
     return {"message": f"User '{username}' deleted successfully "}
 
 @router.put("/update/password")
 async def update_user_password_(data: UpdatePasswordRequest, current_user: UserClaims = Depends(require_authentication)):
-    update_user_password(data, user)
+    update_user_password(data, current_user)
     return {"message": f"Password updated for user '{data.username}' in Keycloak and MLflow"}
 
 @router.put("/role/admin-upgrade")

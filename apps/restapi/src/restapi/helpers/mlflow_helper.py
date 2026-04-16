@@ -1,23 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from restapi.auth import get_current_user, get_current_user_with_restricted_role
+from restapi.auth import get_current_user, require_authentication, UserClaims
 from requests.auth import HTTPBasicAuth
 import requests
 import json
-
-# --- Configuration ---
-MLFLOW_BASE_URL = "http://mlflow-tracking.synthia.svc.cluster.local:80"
-MLFLOW_BASE_URL = "https://mlflow.synthia.gatv.es"
-MLFLOW_USERNAME = "mlflow"
-MLFLOW_PASSWORD = "mlflowpassword"
-
-import os
-os.environ["MLFLOW_TRACKING_USERNAME"] = MLFLOW_USERNAME
-os.environ["MLFLOW_TRACKING_PASSWORD"] = MLFLOW_PASSWORD
+from restapi.config import MLFLOW_BASE_URL, MLFLOW_TRACKING_USERNAME, MLFLOW_TRACKING_PASSWORD
 
 def get_auth():
-    return HTTPBasicAuth(MLFLOW_USERNAME, MLFLOW_PASSWORD)
-
+    return HTTPBasicAuth(MLFLOW_TRACKING_USERNAME, MLFLOW_TRACKING_PASSWORD)
 
 # --- Models ---
 class MLFlowUserCreateRequest(BaseModel):
@@ -45,117 +35,172 @@ def safe_http_request(method: str, endpoint: str, **kwargs):
     url = f"{MLFLOW_BASE_URL}{endpoint}"
     headers = kwargs.pop("headers", {})
     if "json" in kwargs:
-        # Convert JSON to string and set header if not already there
         headers.setdefault("Content-Type", "application/json")
         kwargs["data"] = json.dumps(kwargs.pop("json"))
     try:
-        response = requests.request(method, url, auth=get_auth(), headers=headers,  **kwargs)
+        response = requests.request(method, url, auth=get_auth(), headers=headers, **kwargs)
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=response.text)
         return response.json()
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # ============================
 #        USER MANAGEMENT
 # ============================
 
-def create_user(new_user: MLFlowUserCreateRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
+def create_user(new_user: MLFlowUserCreateRequest, user: UserClaims = Depends(require_authentication)):
     return safe_http_request("POST", "/api/2.0/mlflow/users/create", json=new_user.dict())
 
-def get_user(username: str, user=Depends(get_current_user)):
+def get_user(username: str, user: UserClaims = Depends(require_authentication)):
     return safe_http_request("GET", "/api/2.0/mlflow/users/get", params={"username": username})
 
-def update_password(payload: UpdatePasswordRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
+def update_password(payload: UpdatePasswordRequest, user: UserClaims = Depends(require_authentication)):
     return safe_http_request("PATCH", "/api/2.0/mlflow/users/update-password", json=payload.dict())
 
-def update_admin(payload: UpdateAdminRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-    return safe_http_request("PATCH", "/api/2.0/mlflow/users/update-admin", json=payload)
+def update_admin(payload: UpdateAdminRequest, user: UserClaims = Depends(require_authentication)):
+    return safe_http_request("PATCH", "/api/2.0/mlflow/users/update-admin", json=payload.dict())
 
-def get_model_permissions(username: str):
-    # Example API call to get all model permissions for user
-    response = safe_http_request(
-        "GET",
-        "/api/2.0/mlflow/permissions/model/list",
-        params={"username": username}
-    )
-    return response.get("permissions", [])
-
-def delete_model_permission(object_id: str, username: str):
-    payload = {"object_id": object_id, "username": username}
-    safe_http_request(
-        "DELETE",
-        "/api/2.0/mlflow/permissions/model/delete",
-        json=payload
-    )
-
-def get_experiment_permissions(username: str):
-    # Example API call to get all experiment permissions for user
-    response = safe_http_request(
-        "GET",
-        "/api/2.0/mlflow/permissions/experiment/list",
-        params={"username": username}
-    )
-    return response.get("permissions", [])
-
-def delete_experiment_permission(object_id: str, username: str):
-    payload = {"object_id": object_id, "username": username}
-    safe_http_request(
-        "DELETE",
-        "/api/2.0/mlflow/permissions/experiment/delete",
-        json=payload
-    )
-
-
-def delete_user(username: str, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
+def delete_user(username: str, user: UserClaims = Depends(require_authentication)):
     if not username:
         raise HTTPException(status_code=400, detail="Username is required for deletion")
 
-    # 1. Delete all model permissions for the user
-    #for perm in get_model_permissions(username):
-    #    delete_model_permission(perm["object_id"], username)
-
-    # 2. Delete all experiment permissions for the user
-    #for perm in get_experiment_permissions(username):
-    #    delete_experiment_permission(perm["object_id"], username)
-
     payload = {"username": username}
-    # 3. Delete user form MLFlow
     return safe_http_request("DELETE", "/api/2.0/mlflow/users/delete", json=payload)
 
 # ============================
-#   EXPERIMENT PERMISSIONS
+#        PERMISSIONS
 # ============================
 
-def create_experiment_permission(payload: PermissionRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
+# --- Experiment Permissions ---
+def create_experiment_permission(payload: PermissionRequest, user: UserClaims = Depends(require_authentication)):
     return safe_http_request("POST", "/api/2.0/mlflow/permissions/experiments/create", json=payload.dict())
 
-def get_experiment_permission(object_id: str, user=Depends(get_current_user)):
+def get_experiment_permission(object_id: str, user: UserClaims = Depends(require_authentication)):
     return safe_http_request("GET", "/api/2.0/mlflow/permissions/experiments/get", params={"object_id": object_id})
 
-def update_experiment_permission(payload: PermissionRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
+def update_experiment_permission(payload: PermissionRequest, user: UserClaims = Depends(require_authentication)):
     return safe_http_request("POST", "/api/2.0/mlflow/permissions/experiments/update", json=payload.dict())
 
-# def delete_experiment_permission(payload: PermissionRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-#    return safe_http_request("POST", "/api/2.0/mlflow/permissions/experiments/delete", json=payload.dict())
+def delete_experiment_permission(payload: PermissionRequest, user: UserClaims = Depends(require_authentication)):
+    return safe_http_request("DELETE", "/api/2.0/mlflow/permissions/experiments/update", json=payload.dict())
 
+# --- Registered Model Permissions ---
+def create_model_permission(payload: PermissionRequest, user: UserClaims = Depends(require_authentication)):
+    return safe_http_request("POST", "/api/2.0/preview/mlflow/permissions/registered-models/create", json=payload.dict())
+
+def get_model_permission(object_id: str, user: UserClaims = Depends(require_authentication)):
+    return safe_http_request("GET", "/api/2.0/preview/mlflow/permissions/registered-models/get", params={"object_id": object_id})
+
+def update_model_permission(payload: PermissionRequest, user: UserClaims = Depends(require_authentication)):
+    return safe_http_request("POST", "/api/2.0/preview/mlflow/permissions/registered-models/update", json=payload.dict())
+
+def delete_model_permission(payload: PermissionRequest, user: UserClaims = Depends(require_authentication)):
+    return safe_http_request("DELETE", "/api/2.0/preview/mlflow/permissions/registered-models/update", json=payload.dict())
+
+def search_model_versions_by_run(run_id: str, user: UserClaims):
+    try:
+        # Step 1: get all registered models
+        models_response = list_registered_models(user)
+
+        if "registered_models" not in models_response:
+            return {"model_versions": []}
+
+        matched_versions = []
+
+        # Step 2: iterate models
+        for model in models_response["registered_models"]:
+            model_name = model["name"]
+
+            # Step 3: get versions for each model
+            versions_response = get_model_versions(model_name, user)
+
+            if "model_versions" not in versions_response:
+                continue
+
+            # Step 4: filter by run_id
+            for version in versions_response["model_versions"]:
+                if version.get("run_id") == run_id:
+                    matched_versions.append(version)
+
+        return {"model_versions": matched_versions}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error searching model versions by run_id: {str(e)}",
+        )
 
 # ============================
-#  REGISTERED MODEL PERMISSIONS
+#        EXPERIMENTS
 # ============================
 
-def create_model_permission(payload: PermissionRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-    return safe_http_request("POST", "/api/2.0/mlflow/permissions/registered-models/create", json=payload.dict())
+def search_experiments(payload: dict = {}, user: dict = Depends(get_current_user)):
+    if not payload.get("max_results"):
+        payload["max_results"] = 100
+    return safe_http_request("POST", "/api/2.0/mlflow/experiments/search", json=payload)
 
-def get_model_permission(object_id: str, user=Depends(get_current_user)):
-    return safe_http_request("GET", "/api/2.0/mlflow/permissions/registered-models/get", params={"object_id": object_id})
+def get_experiment(experiment_id: str, user: dict = Depends(get_current_user)):
+    return safe_http_request("GET", "/api/2.0/mlflow/experiments/get", params={"experiment_id": experiment_id})
 
-def update_model_permission(payload: PermissionRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-    return safe_http_request("POST", "/api/2.0/mlflow/permissions/registered-models/update", json=payload.dict())
+def get_experiment_id_by_name(experiment_name: str, user: dict = Depends(get_current_user)):
+    response = safe_http_request("GET", "/api/2.0/mlflow/experiments/get-by-name", params={"experiment_name": experiment_name})
+    return response.get("experiment", {}).get("experiment_id")
 
-#def delete_model_permission(payload: PermissionRequest, user=Depends(get_current_user_with_restricted_role(["central_node_admin"]))):
-#    return safe_http_request("POST", "/api/2.0/mlflow/permissions/registered-models/delete", json=payload.dict())
+def create_experiment(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/experiments/create", json=payload)
+
+def delete_experiment(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/experiments/delete", json=payload)
+
+def restore_experiment(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/experiments/restore", json=payload)
+
+# ============================
+#        RUNS
+# ============================
+
+def search_runs(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/runs/search", json=payload)
+
+def get_run(run_id: str, user: dict = Depends(get_current_user)):
+    return safe_http_request("GET", "/api/2.0/mlflow/runs/get", params={"run_id": run_id})
+
+def delete_run(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/runs/delete", json=payload)
+
+def restore_run(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/runs/restore", json=payload)
+
+# ============================
+#        REGISTERED MODELS
+# ============================
+
+def list_registered_models(user: dict = Depends(get_current_user)):
+    return safe_http_request("GET", "/api/2.0/mlflow/registered-models/search")
+
+def get_registered_model(name: str, user: dict = Depends(get_current_user)):
+    return safe_http_request("GET", "/api/2.0/mlflow/registered-models/get", params={"name": name})
+
+def create_registered_model(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/registered-models/create", json=payload)
+
+def delete_registered_model(payload: dict, user: dict = Depends(get_current_user)):
+    return safe_http_request("POST", "/api/2.0/mlflow/registered-models/delete", json=payload)
+
+# --- Model Versions ---
+def get_model_version(name: str, version: str, user: dict = Depends(get_current_user)):
+    return safe_http_request("GET", "/api/2.0/mlflow/model-versions/search", params={"name": name, "version": version})
+
+def get_model_versions(name: str, user: dict = Depends(get_current_user)):
+    return safe_http_request(
+        "GET",
+        "/api/2.0/mlflow/model-versions/search",
+        params={"filter": f"name='{name}'"}
+    )
+
+def get_model_download_uri(name: str, version: str, user: dict = Depends(get_current_user)):
+    return safe_http_request("GET", "/api/2.0/mlflow/model-versions/get-download-uri", params={"name": name, "version": version})
 
 
 ###### END OF ADMIN ENDPOINTS   ######
@@ -177,27 +222,6 @@ def get_experiment_id_by_name(experiment_name: str, user: dict = Depends(get_cur
     )
     return response.get("experiment", {}).get("experiment_id")
 
-def create_experiment(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/experiments/create", json=payload)
-
-def delete_experiment(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/experiments/delete", json=payload)
-
-def restore_experiment(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/experiments/restore", json=payload)
-
-# --- Runs ---
-def search_runs(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/runs/search", json=payload)
-
-def get_run(run_id: str, user: dict = Depends(get_current_user)):
-    return safe_http_request("GET", "/api/2.0/mlflow/runs/get", params={"run_id": run_id})
-
-def delete_run(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/runs/delete", json=payload)
-
-def restore_run(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/runs/restore", json=payload)
 
 
 # Get child runs of a given parent run
@@ -246,7 +270,7 @@ def get_run_metrics(run_id: str, key: str, user: dict = Depends(get_current_user
     return safe_http_request("GET", "/api/2.0/mlflow/metrics/get-history", params=params)
 
 
-def get_all_run_metrics(run_id: str, user=Depends(get_current_user)):
+def get_all_run_metrics(run_id: str, user: UserClaims = Depends(require_authentication)):
     metrics = {}
 
     # Get list of metric keys first
@@ -276,26 +300,6 @@ def get_all_run_metrics(run_id: str, user=Depends(get_current_user)):
         metrics[key] = all_values
 
     return {"run_id": run_id, "metrics": metrics}
-
-# --- Models ---
-def list_registered_models(user: dict = Depends(get_current_user)):
-    return safe_http_request("GET", "/api/2.0/mlflow/registered-models/search")
-
-def get_registered_model(name: str, user: dict = Depends(get_current_user)):
-    return safe_http_request("GET", "/api/2.0/mlflow/registered-models/get", params={"name": name})
-
-def create_registered_model(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/registered-models/create", json=payload)
-
-def delete_registered_model(payload: dict, user: dict = Depends(get_current_user)):
-    return safe_http_request("POST", "/api/2.0/mlflow/registered-models/delete", json=payload)
-
-# --- Model Versions ---
-def get_model_version(name: str, version: str, user: dict = Depends(get_current_user)):
-    return safe_http_request("GET", "/api/2.0/mlflow/model-versions/search", params={"name": name, "version": version})
-
-def get_model_download_uri(name: str, version: str, user: dict = Depends(get_current_user)):
-    return safe_http_request("GET", "/api/2.0/mlflow/model-versions/get-download-uri", params={"name": name, "version": version})
 
 def search_model_versions(
     model_name: str,

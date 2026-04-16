@@ -9,18 +9,11 @@ from typing import Optional, Annotated
 from fastapi import Depends, HTTPException, status
 
 
+KEYCLOAK_SERVER_URL=os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
+KEYCLOAK_CLIENT_ID=os.getenv("KEYCLOAK_CLIENT_ID", "synthema")
+KEYCLOAK_REALM=os.getenv("KEYCLOAK_REALM", "Synthema")
 
-#KEYCLOAK_SERVER_URL=os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
-#KEYCLOAK_CLIENT_ID=os.getenv("KEYCLOAK_CLIENT_ID", "synthema")
-#KEYCLOAK_REALM=os.getenv("KEYCLOAK_REALM", "Synthema")
-
-KEYCLOAK_SERVER_URL="https://users.k8s.synthema.rid-intrasoft.eu"#os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
-KEYCLOAK_CLIENT_ID="synthema"#os.getenv("KEYCLOAK_CLIENT_ID", "synthema")
-KEYCLOAK_REALM="Synthema"#os.getenv("KEYCLOAK_REALM", "Synthema")
-
-keycloak_openid = KeycloakOpenID(server_url=KEYCLOAK_SERVER_URL,
-                                 client_id=KEYCLOAK_CLIENT_ID,
-                                 realm_name=KEYCLOAK_REALM)
+keycloak_openid = KeycloakOpenID(server_url=KEYCLOAK_SERVER_URL,client_id=KEYCLOAK_CLIENT_ID,realm_name=KEYCLOAK_REALM,verify=False)
 
 class UserClaims(BaseModel):
     exp: int
@@ -34,9 +27,9 @@ class UserClaims(BaseModel):
     scope: str
     sid: str
     synthema_roles: List[str] = Field(alias="synthemaRoles", default_factory=list)
-    name: str = Field(alias="firstName")
-    last_name: str = Field(alias="lastName")
-    username: str
+    name: str = Field(alias="given_name", default="")           # was firstName
+    last_name: str = Field(alias="family_name", default="")     # was lastName
+    username: str = Field(alias="preferred_username", default="") # was username
 
     def has_organization_role(self, organization, role) -> bool:
         for syn_role in self.synthema_roles:
@@ -56,11 +49,19 @@ class UserClaims(BaseModel):
 
 oauth2_scheme = HTTPBearer()
 
+public_key= """
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyTxbyXWK2+VMXjk8UvjQOrO2AHchsiRnz5co/PD+C2p+LOPBNdCsG7qKtdOHGUT3FHcGPgs9JB7/nv3Esb+8pkyuDM0BkdyUhN18EZQYXmNokxsWfSjdn/DjY/ulsWtvQD1/hBskFqQEjduGf40CYu5tEmrlahcyIBSGuZNh+QSqStOH5PU6kZdBlkTtVe8rbcJawvozZ3lnpwD2SESHiLZuY5m5ZDUVlsSJ9zdM6cHoQHt8WUvbJIfXClKR4uiFjX1A/Lhif8FsIakrJoUSFl90DEvOOsvjrlbl0oV48FGNTQ3lUBAybafqD+JCC9Ypu0BZAf28IPYZWp0NnW21WwIDAQAB
+-----END PUBLIC KEY-----
+"""
+
 def get_user_data_from_token(token: str) -> UserClaims:
     decoded_token = keycloak_openid.decode_token(token,
-                                                 #key=public_key,
-                                                 validate=True
+                                                 key=public_key,
+                                                 #key=None,
+                                                 validate=False
                                                 )
+
     user_claims = UserClaims(**decoded_token)
     return user_claims
 
@@ -70,6 +71,7 @@ async def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, 
     try:
         user = get_user_data_from_token(token)
     except (JWTExpired, InvalidJWSSignature, InvalidJWSObject):
+        print("JWT error:", e)
         user = None
 
     if not user:

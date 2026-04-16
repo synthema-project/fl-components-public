@@ -24,6 +24,7 @@ asyncpg = "^0.30.0"
 python-jose = {extras = ["cryptography"], version = "^3.4.0"}
 fastapi-keycloak = "^1.1.0"
 mlflow-skinny = "3"
+python-keycloak = "^7.1.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"

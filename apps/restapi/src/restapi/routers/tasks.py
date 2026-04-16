@@ -10,7 +10,6 @@ from interfaces.rabbitmq_client import AsyncRabbitMQClient
 from schemas.task import TaskCreate, TaskRead, TaskStatus
 
 from restapi.auth import UserClaims, require_authentication
-from config import KEYCLOAK_ROLE_NAME_PLATFORM_ADMIN
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -60,7 +59,7 @@ async def create_task(
     task: TaskCreate,
     session: AsyncSession = Depends(get_session),
     rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
-    user: dict = Depends(get_current_user_with_restricted_role),
+    current_user: UserClaims = Depends(require_authentication),
 ) -> TaskRead:
     try:
         db_task = TaskRead.model_validate(task)
