@@ -118,6 +118,14 @@ services:
       - POSTGRES_PORT=5432
       - DB_ECHO=true
       - DB_MODE=postgresql
+      - KEYCLOAK_SERVER_URL=http://users.k8s.synthema.rid-intrasoft.eu/
+      - KEYCLOAK_CLIENT_ID=synthema
+      - KEYCLOAK_REALM_NAME=Synthema
+      - MLFLOW_BASE_URL=http://mlflow
+      - MLFLOW_TRACKING_USERNAME=mlflow
+      - MLFLOW_TRACKING_PASSWORD=mlflowpassword
+      - FL_NODES=["node1", "node2"]
+      - DATA_CATALOGUE_URL=http://data-catalogue
     depends_on:
       rabbitmq:
         condition: service_healthy
