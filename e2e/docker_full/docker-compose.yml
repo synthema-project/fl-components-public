@@ -27,10 +27,12 @@ services:
           cpus: "1"
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow
+    image: ghcr.io/mlflow/mlflow:v2.16.2
     container_name: mlflow
     ports:
       - 10000:80
+    environment:
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,localhost,127.0.0.1"
     command: ["mlflow", "server", "--host", "0.0.0.0", "--port", "80", 
             "--serve-artifacts", "--artifacts-destination", "file:///artifacts",
             "--backend-store-uri", "sqlite:///store.db"]
