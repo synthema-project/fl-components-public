@@ -66,20 +66,60 @@ def get_user_data_from_token(token: str) -> UserClaims:
     return user_claims
 
 
-async def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depends(oauth2_scheme)]) -> UserClaims:
+def get_mock_user() -> UserClaims:
+    return UserClaims(
+        sub="e2e-test-user",
+        preferred_username="e2e-test-user",
+        given_name="E2E",
+        family_name="Tests",
+        synthemaRoles=[
+            "test:Admin",
+        ],
+    )
+
+
+async def get_current_user(
+    credentials: Annotated[
+        Optional[HTTPAuthorizationCredentials],
+        Depends(oauth2_scheme),
+    ],
+) -> UserClaims:
+
+    # E2E auth bypass
+    if AUTH_DISABLE_TESTS:
+        logger.warning(
+            "AUTH_DISABLE_TESTS detected - bypassing authentication"
+        )
+
+        return get_mock_user()
+
+    # Normal authentication flow
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
+
     try:
         user = get_user_data_from_token(token)
-    except (JWTExpired, InvalidJWSSignature, InvalidJWSObject):
-        print("JWT error:", e)
-        user = None
 
-    if not user:
+    except (
+        JWTExpired,
+        InvalidJWSSignature,
+        InvalidJWSObject,
+    ) as e:
+
+        logger.error("JWT validation error: %s", str(e))
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     return user
 
 

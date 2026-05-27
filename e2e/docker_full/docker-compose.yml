@@ -128,6 +128,7 @@ services:
       - MLFLOW_TRACKING_PASSWORD=mlflowpassword
       - FL_NODES=["node1", "node2"]
       - DATA_CATALOGUE_URL=http://data-catalogue
+      - AUTH_DISABLE_TESTS=True
     depends_on:
       rabbitmq:
         condition: service_healthy

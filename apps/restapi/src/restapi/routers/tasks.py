@@ -10,6 +10,7 @@ from interfaces.rabbitmq_client import AsyncRabbitMQClient
 from schemas.task import TaskCreate, TaskRead, TaskStatus
 
 from restapi.auth import UserClaims, require_authentication
+from restapi.config import AUTH_DISABLE_TESTS
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
