@@ -2,7 +2,7 @@ import os
 from typing import Any
 
 
-def get_env_variable(name: str, default_value: str) -> str:
+def get_env_variable(name: str, default_value: str = "") -> str:
     """Fetches an environment variable and raises an exception if it's missing."""
     value = os.getenv(name, default)
     if value is None:
