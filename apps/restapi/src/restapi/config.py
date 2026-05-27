@@ -4,7 +4,7 @@ from typing import Any
 
 def get_env_variable(name: str) -> str:
     """Fetches an environment variable and raises an exception if it's missing."""
-    value = os.getenv(name, default)
+    value = os.getenv(name)
     if value is None:
         raise ValueError(f"Missing required environment variable: {name}")
     return value
