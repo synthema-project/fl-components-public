@@ -2,7 +2,7 @@ import os
 from typing import Any
 
 
-def get_env_variable(name: str, default_value: str = "") -> str:
+def get_env_variable(name: str) -> str:
     """Fetches an environment variable and raises an exception if it's missing."""
     value = os.getenv(name, default)
     if value is None:
@@ -43,7 +43,12 @@ FL_NODES = get_env_variable("FL_NODES") #IDS []?
 DATA_CATALOGUE_URL = get_env_variable("DATA_CATALOGUE_URL")
 
 
+# Tests auth disabler
+try:
+    AUTH_DISABLE_TESTS = get_env_variable("AUTH_DISABLE_TESTS")
+    if AUTH_DISABLE_TESTS is none:
+        AUTH_DISABLE_TESTS= False
+except ValueError as e:
+    print(e)
 # Global object for shared runtime config
-
-AUTH_DISABLE_TESTS = get_env_variable("AUTH_DISABLE_TESTS", False)
 obj: dict[str, Any] = {}
