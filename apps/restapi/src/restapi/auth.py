@@ -47,7 +47,7 @@ class UserClaims(BaseModel):
 
         return False
 
-oauth2_scheme = HTTPBearer()
+oauth2_scheme = HTTPBearer(auto_error=False)
 
 public_key= """
 -----BEGIN PUBLIC KEY-----
@@ -68,14 +68,21 @@ def get_user_data_from_token(token: str) -> UserClaims:
 
 def get_mock_user() -> UserClaims:
     return UserClaims(
-        sub="e2e-test-user",
-        preferred_username="e2e-test-user",
-        given_name="E2E",
-        family_name="Tests",
-        synthemaRoles=[
-            "test:Admin",
-        ],
-    )
+            exp=9999999999,
+            iat=0,
+            jti="test",
+            iss="test",
+            sub="test-user",
+            typ="Bearer",
+            azp="test",
+            session_state="test",
+            scope="openid",
+            sid="test",
+            synthemaRoles=["test:Admin"],
+            given_name="E2E",
+            family_name="Test",
+            preferred_username="e2e-test",
+        )
 
 
 async def get_current_user(
