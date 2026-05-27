@@ -46,7 +46,7 @@ DATA_CATALOGUE_URL = get_env_variable("DATA_CATALOGUE_URL")
 # Tests auth disabler
 try:
     AUTH_DISABLE_TESTS = get_env_variable("AUTH_DISABLE_TESTS")
-    if AUTH_DISABLE_TESTS is none:
+    if AUTH_DISABLE_TESTS is None:
         AUTH_DISABLE_TESTS= False
 except ValueError as e:
     print(e)
