@@ -86,6 +86,7 @@ async def get_current_user(
 ) -> UserClaims:
 
     # E2E auth bypass
+    print("AUTH_DISABLE_TESTS =", AUTH_DISABLE_TESTS)
     if AUTH_DISABLE_TESTS:
         logger.warning(
             "AUTH_DISABLE_TESTS detected - bypassing authentication"
