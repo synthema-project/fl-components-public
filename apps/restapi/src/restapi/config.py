@@ -45,9 +45,9 @@ DATA_CATALOGUE_URL = get_env_variable("DATA_CATALOGUE_URL")
 
 # Tests auth disabler
 try:
-    AUTH_DISABLE_TESTS = get_env_variable("AUTH_DISABLE_TESTS")
-    if AUTH_DISABLE_TESTS is None:
-        AUTH_DISABLE_TESTS= False
+    AUTH_DISABLE_TESTS = os.getenv("AUTH_DISABLE_TESTS", False)
+    print("AUTH_DISABLE_TESTS: "+AUTH_DISABLE_TESTS)
+
 except ValueError as e:
     print(e)
 # Global object for shared runtime config
