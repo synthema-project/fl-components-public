@@ -8,7 +8,7 @@ from jwcrypto.jwt import JWTExpired
 from typing import Optional, Annotated
 from fastapi import Depends, HTTPException, status
 from restapi.config import AUTH_DISABLE_TESTS
-from restapi.main import logger
+
 
 
 KEYCLOAK_SERVER_URL=os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
@@ -97,7 +97,7 @@ async def get_current_user(
     # E2E auth bypass
     print("AUTH_DISABLE_TESTS =", AUTH_DISABLE_TESTS)
     if AUTH_DISABLE_TESTS:
-        logger.warning(
+        print(
             "AUTH_DISABLE_TESTS detected - bypassing authentication"
         )
 
