@@ -8,6 +8,7 @@ from jwcrypto.jwt import JWTExpired
 from typing import Optional, Annotated
 from fastapi import Depends, HTTPException, status
 from restapi.config import AUTH_DISABLE_TESTS
+from restapi.main import logger
 
 
 KEYCLOAK_SERVER_URL=os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
