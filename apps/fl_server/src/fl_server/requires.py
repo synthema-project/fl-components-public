@@ -37,7 +37,7 @@ def execution_flow(
         else:
             recordset = recordset_factory(*recordset_factory_args)
 
-        message = driver_utils.create_message(
+        message = driver_utils.create_messages(
             driver=driver,
             node_id=node_id,
             recordset=recordset,
