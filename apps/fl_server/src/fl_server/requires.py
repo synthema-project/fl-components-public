@@ -39,10 +39,10 @@ def execution_flow(
 
         message = driver_utils.create_messages(
             driver=driver,
-            node_id=node_id,
-            recordset=recordset,
-            msg_type=msg_type,
-            msg_group=msg_group,
+            dst_node_id=node_id,
+            content=recordset,
+            message_type=msg_type,
+            group_id=msg_group,
         )
 
         messages.append(message)
