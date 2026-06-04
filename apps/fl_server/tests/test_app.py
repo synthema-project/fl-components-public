@@ -10,7 +10,7 @@ from fl_server.app import (
     get_serverapp,
 )
 from fl_server import config
-from schemas.task import TaskRead
+from fl_server.schemas.task import TaskRead
 
 
 @pytest.fixture
@@ -95,19 +95,24 @@ async def test_execute_training_loop(driver, node_ids, parameters):
     with (
         patch("fl_server.app.requires.train_model") as mock_train,
         patch("fl_server.app.stages.aggregate_parameters") as mock_aggregate_params,
-        patch("fl_server.app.stages.aggregate_metrics"),
+        patch("fl_server.app.stages.aggregate_metrics") as mock_aggregate_metrics,
         patch("fl_server.app.mlflow_client.log_metrics") as mock_log_metrics,
         patch("fl_server.app.requires.set_parameters") as mock_set_params,
+        patch("fl_server.app.requires.evaluate_model") as mock_evaluate,
     ):
         mock_train.return_value = [(parameters, {}) for _ in range(n_global_iter)]
         mock_aggregate_params.return_value = parameters
+        mock_evaluate.return_value = []
+        mock_aggregate_metrics.return_value = MetricsRecord({"accuracy": 0.9})
 
         await execute_training_loop(driver, node_ids, parameters, n_global_iter)
 
         assert mock_train.call_count == n_global_iter
         assert mock_aggregate_params.call_count == n_global_iter
-        assert mock_log_metrics.call_count == n_global_iter
+        assert mock_evaluate.call_count == n_global_iter
+        assert mock_log_metrics.call_count == n_global_iter * 2
         assert mock_set_params.call_count == n_global_iter
+
 
 
 @pytest.mark.asyncio

@@ -281,3 +281,16 @@ def read_set_smpc_enabled_recordset(recordset: RecordSet) -> bool:
     if not isinstance(smpc_enabled, bool):
         raise TypeError(f"smpc_enabled must be a boolean, received {type(smpc_enabled)}")
     return smpc_enabled
+
+
+def create_evaluate_recordset(parametersrecord: ParametersRecord) -> RecordSet:
+    configsrecord = ConfigsRecord({"mode": "evaluate_model"})
+    return RecordSet(
+        parameters_records={"parameters": parametersrecord},
+        configs_records={"config": configsrecord},
+    )
+
+
+def read_evaluate_recordset(recordset: RecordSet) -> ParametersRecord:
+    return recordset.parameters_records["parameters"]
+

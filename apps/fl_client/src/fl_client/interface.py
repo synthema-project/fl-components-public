@@ -182,3 +182,11 @@ def start_P2P_server_if(msg: Message, global_vars: dict) -> Message:
     )
 
     return responses_utils.create_start_p2p_server_response(msg, config['port'])
+
+
+def evaluate_model_if(msg: Message, global_vars: dict) -> Message:
+    latest_parameters = recordset.read_evaluate_recordset(msg.content)
+    stages.set_model_parameters(latest_parameters, global_vars)
+    metrics = stages.evaluate_model(global_vars)
+    return responses_utils.create_evaluate_response(msg, metrics)
+

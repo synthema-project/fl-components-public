@@ -21,7 +21,8 @@ from fl_client.interface import (
     start_P2P_server_if,
     train_model_SMPC_if,
     set_smpc_enabled_if,
-    set_dp_config_if
+    set_dp_config_if,
+    evaluate_model_if
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -121,4 +122,6 @@ def train(msg: Message, ctx: Context) -> Message:
 
 @app.evaluate()
 def evaluate(msg: Message, ctx: Context) -> Message:
-    raise NotImplementedError()
+    global global_vars
+    return evaluate_model_if(msg, global_vars)
+
