@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime
+from typing import Optional
 
 from sqlmodel import SQLModel, Field, Column, Enum
 from pydantic import BaseModel
@@ -19,6 +20,8 @@ class TaskStatus(BaseModel):
 
 
 class TaskBase(SQLModel):
+    """Base schema for FL tasks, shared between read and create variants."""
+
     user_id: str = Field(nullable=False)
     # dataset_uris: List[str] = Field(default=None, sa_column=Column(ARRAY(String())))
     use_case: str = Field(nullable=False)
@@ -27,6 +30,23 @@ class TaskBase(SQLModel):
     num_global_iterations: int = Field(nullable=False)
     run_name: str = Field(nullable=False)
     experiment_name: str = Field(nullable=False)
+    dataset_meta_json: Optional[str] = Field(
+        default=None, description="Serialised DCAT-AP metadata schema"
+    )
+
+    # --- Privacy / security configuration ---
+    SMPC_enabled: bool = Field(
+        default=False, description="Enable Secure Multi-Party Computation"
+    )
+    dp_mode: Optional[str] = Field(
+        default=None, description="Differential-privacy mode (e.g. 'central_dp')"
+    )
+    noise_multiplier: Optional[float] = Field(
+        default=None, description="DP noise multiplier"
+    )
+    clipping_norm: Optional[float] = Field(
+        default=None, description="DP gradient-clipping norm"
+    )
 
 
 class TaskRead(TaskBase, table=True):
