@@ -31,6 +31,7 @@ class TaskBase(SQLModel):
     dp_mode: Optional[str] = Field(default=None)
     noise_multiplier: Optional[int] = Field(default=None)
     clipping_norm: Optional[int] = Field(default=None)
+    dataset_meta_json: Optional[str] = Field(default=None, description="Serialised DCAT-AP metadata schema")
 
 class TaskRead(TaskBase, table=True):
     id: int = Field(default=None, primary_key=True, nullable=False)
