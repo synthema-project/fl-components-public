@@ -77,6 +77,16 @@ async def execute_training_loop(
         )
         mlflow_client.log_metrics(cast(dict, aggregated_metrics), step=iteration)
         requires.set_parameters(driver, node_ids, aggregated_parameters)
+        parameters = aggregated_parameters
+
+        # Trigger intra-round evaluation (internal validation)
+        eval_metrics = requires.evaluate_model(driver, node_ids, aggregated_parameters)
+        aggregated_eval_metrics = stages.aggregate_metrics(
+            eval_metrics, config.global_vars
+        )
+        val_metrics_dict = {f"val_{k}": v for k, v in aggregated_eval_metrics.items()}
+        mlflow_client.log_metrics(val_metrics_dict, step=iteration)
+
 
 
 async def server_main(task: TaskRead, driver: Driver, context: Context,
