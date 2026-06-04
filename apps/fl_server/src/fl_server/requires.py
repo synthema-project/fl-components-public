@@ -12,9 +12,13 @@ from flwr.server import Driver
 
 from fl_server import stages
 from fl_server.utils import driver_utils, requires_utils
+from fl_server.data_catalogue import DataCatalogueClient
+from fl_server.config import DATA_CATALOGUE_URL
+from interfaces.recordset import create_load_data_recordset
 
 import interfaces.recordset
 logger = structlog.get_logger()
+
 
 def execution_flow(
     driver,
@@ -39,20 +43,20 @@ def execution_flow(
 
         message = driver_utils.create_messages(
             driver=driver,
-            dst_node_id=node_id,
+            dst_node_id=[node_id],
             content=recordset,
             message_type=msg_type,
             group_id=msg_group,
         )
 
-        messages.append(message)
+        messages.extend(message)
 
     driver_utils.send_messages(driver, messages)
 
     replies = driver_utils.wait_messages(driver, messages)
 
     if check_success:
-        driver_utils.check_replies_success(replies)
+        requires_utils.check_success_clients(replies)
 
     return replies
 
@@ -317,3 +321,25 @@ def connect_peers(
         all_replies.extend(partial_replies)
 
     return [msg.content.configs_records['config']['peers'] for msg in all_replies]
+
+
+def evaluate_model(
+    driver: Driver,
+    node_ids: list[int],
+    parametersrecord: ParametersRecord,
+) -> list[MetricsRecord]:
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_evaluate_recordset,
+        msg_type=MessageType.EVALUATE,
+        msg_group="evaluate_model",
+        recordset_factory_args=(parametersrecord,),
+        check_success=True,
+    )
+
+    return [
+        msg.content.metrics_records["metrics"]
+        for msg in all_replies
+    ]
+
