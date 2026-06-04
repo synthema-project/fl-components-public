@@ -257,7 +257,7 @@ def generate_synthetic_and_upload(global_vars: dict,
     Returns a dictionary with uploaded object URIs and local paths.
     """
     local_learner = global_vars.get("local_learner")
-    node_name = global_vars.get("node_name")
+    node_name = os.environ.get("NODE_NAME") or global_vars.get("node_name")
     use_case = global_vars.get("use_case") or "unknown"
     node_id = node_name
 
@@ -348,6 +348,7 @@ def generate_synthetic_and_upload(global_vars: dict,
             "utility_report": util_fname,
             "privacy_report": priv_fname,
         },
+        "node_name": node_name,
         "s3_uris": {}
     }
 
