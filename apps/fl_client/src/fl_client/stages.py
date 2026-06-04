@@ -38,9 +38,9 @@ def load_data(
     global_vars: dict,
 ):
     if not dataset_paths:
-    raise ValueError(
-        f"No dataset paths received for node {global_vars['node_name']}"
-    )
+        raise ValueError(
+            f"No dataset paths received for node {global_vars['node_name']}"
+        )
 
     dataframes = []
 

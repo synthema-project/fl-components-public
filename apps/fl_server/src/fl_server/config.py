@@ -7,6 +7,8 @@ RABBIT_PASSWORD: str = os.environ["RABBIT_PASSWORD"]
 RABBIT_HOST: str = os.environ["RABBIT_HOST"]
 RABBIT_PORT: str = os.getenv("RABBIT_PORT", "5672")
 
+DATA_CATALOGUE_URL: str = os.getenv("DATA_CATALOGUE_URL", "http://data-catalogue:8000")
+
 P2P_PORT: int = int(os.getenv("P2P_PORT", "50051"))
 
 global global_vars

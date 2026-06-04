@@ -10,7 +10,8 @@ from flwr.common import (
 )
 from flwr.server import Driver
 
-from fl_server import stages
+from fl_server import stages, config
+from fl_server.data_catalogue import DataCatalogueClient
 from fl_server.utils import driver_utils, requires_utils
 
 import interfaces.recordset
@@ -73,7 +74,7 @@ def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[i
 def load_data(driver, node_ids: list[int], use_case: str):
 
     catalogue_client = DataCatalogueClient(
-        base_url=DATA_CATALOGUE_URL
+        base_url=config.DATA_CATALOGUE_URL
     )
 
     node_dataset_map = catalogue_client.get_use_case_datasets(use_case)
@@ -82,7 +83,7 @@ def load_data(driver, node_ids: list[int], use_case: str):
         node_name = f"NODE{node_id}"
         dataset_paths = node_dataset_map.get(node_name, [])
 
-        return create_load_data_recordset(use_case, dataset_paths)
+        return interfaces.recordset.create_load_data_recordset(use_case, dataset_paths)
 
     execution_flow(
         driver=driver,
