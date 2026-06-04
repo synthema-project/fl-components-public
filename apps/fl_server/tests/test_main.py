@@ -8,7 +8,7 @@ import aio_pika
 from fl_server.main import event_handler, configure
 from fl_server import config
 
-from schemas.task import TaskRead
+from fl_server.schemas.task import TaskRead
 
 
 @pytest_asyncio.fixture
