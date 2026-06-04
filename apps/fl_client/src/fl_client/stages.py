@@ -1,4 +1,5 @@
 from typing import Any, List, Dict
+import inspect
 import numpy as np
 import grpc
 import pandas as pd
@@ -11,6 +12,9 @@ from interfaces import mlflow_client
 from fl_client.SMPCClient import SMPCClient
 from fl_client import smpc_pb2
 from fl_client.utils.minio_loader import download_object
+
+# Import the strict MLOps partitioning enum
+from model_store_interface.core.dataset_partition import DatasetPartition
 
 logger = structlog.get_logger()
 def set_run_config(
@@ -33,33 +37,61 @@ def set_run_config(
 
 
 def load_data(
-    use_case: str,
-    dataset_paths: list[str],
-    global_vars: dict,
-):
+    use_case: str, dataset_paths: list[str], global_vars: dict
+) -> None:
+    """Loads and mathematically partitions the clinical tabular data."""
     if not dataset_paths:
-    raise ValueError(
-        f"No dataset paths received for node {global_vars['node_name']}"
-    )
+        raise ValueError(
+            f"No dataset paths received for node {global_vars['node_name']}"
+        )
+
+    logger.info(f"Loading real clinical data from {dataset_paths}...")
 
     dataframes = []
-
     for object_path in dataset_paths:
         local_file = download_object(object_path)
         df = pd.read_csv(local_file)
         dataframes.append(df)
 
-    dataset = pd.concat(dataframes, ignore_index=True)
+    data = pd.concat(dataframes, ignore_index=True)
 
-    global_vars["dataset"] = dataset
-    global_vars["use_case"] = use_case
+    # Strict DevSecOps Partitioning (60% Train, 20% Val, 20% Test)
+    # The fixed random_state guarantees deterministic splits across all Ubuntu edge nodes
+    shuffled_data = data.sample(frac=1.0, random_state=42).reset_index(drop=True)
+    n_samples = len(shuffled_data)
+    train_end = int(n_samples * 0.6)
+    val_end = int(n_samples * 0.8)
 
+    global_vars[DatasetPartition.TRAIN] = shuffled_data.iloc[:train_end].reset_index(drop=True)
+    global_vars[DatasetPartition.VAL] = shuffled_data.iloc[train_end:val_end].reset_index(drop=True)
+    global_vars[DatasetPartition.TEST] = shuffled_data.iloc[val_end:].reset_index(drop=True)
+
+    # Legacy compatibility for older learners
+    global_vars["data"] = data
 
 
 def prepare_data(global_vars: dict) -> None:
+    """Prepares dataset partitions using the local learner."""
     local_learner = global_vars["local_learner"]
-    data = global_vars["data"]
-    local_learner.prepare_data(data=data)
+    sig = inspect.signature(local_learner.prepare_data)
+
+    if "partition" in sig.parameters:
+        # Call prepare_data for each partition and save the prepared dataframes
+        for partition in [DatasetPartition.TRAIN, DatasetPartition.VAL, DatasetPartition.TEST]:
+            data = global_vars.get(partition)
+            if data is not None:
+                kwargs = {}
+                if "data" in sig.parameters:
+                    kwargs["data"] = data
+                kwargs["partition"] = partition
+                if "dataset_meta" in sig.parameters:
+                    kwargs["dataset_meta"] = global_vars.get("dataset_meta")
+                prepared = local_learner.prepare_data(**kwargs)
+                global_vars[f"prepared_{partition.value}"] = prepared
+    else:
+        # Legacy compatibility - prepare only the train/raw data
+        train_data = global_vars.get(DatasetPartition.TRAIN, global_vars.get("data"))
+        local_learner.prepare_data(train_data)
 
 
 def load_model(
@@ -77,8 +109,17 @@ def train_model(
     current_global_iter: int,
 ) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
-    # metrics = local_learner.train_round()
-    metrics = local_learner.train()
+    if hasattr(local_learner, "train_round"):
+        train_data = global_vars.get("prepared_train", global_vars.get(DatasetPartition.TRAIN, global_vars["data"]))
+        metrics = local_learner.train_round(
+            data=train_data,
+            dataset_meta=global_vars.get("dataset_meta")
+        )
+    elif hasattr(local_learner, "train"):
+        metrics = local_learner.train()
+    else:
+        raise AttributeError("local_learner has neither 'train_round' nor 'train' method")
+
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Unexpected metrics type: {type(metrics)}")
     mlflow_client.log_metrics(metrics, current_global_iter)
@@ -87,7 +128,19 @@ def train_model(
 
 def evaluate_model(global_vars: dict) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
-    metrics = local_learner.evaluate()
+    if hasattr(local_learner, "evaluate"):
+        sig = inspect.signature(local_learner.evaluate)
+        if len(sig.parameters) == 0:
+            metrics = local_learner.evaluate()
+        else:
+            val_data = global_vars.get("prepared_val", global_vars.get(DatasetPartition.VAL, global_vars["data"]))
+            metrics = local_learner.evaluate(
+                data=val_data,
+                dataset_meta=global_vars.get("dataset_meta")
+            )
+    else:
+        raise AttributeError("local_learner has no 'evaluate' method")
+
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Expected MetricsRecord, got {type(metrics)}")
     return metrics
