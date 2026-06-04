@@ -24,7 +24,7 @@ sqlmodel = "^0.0.21"
 psutil = "^6.0.0"
 structlog = "^25.1.0"
 aio-pika = "^9.5.4"
-model-store-interface = "0.3.0"
+model-store-interface = {version = ">=0.5.0", extras = ["edge"]}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"
@@ -52,6 +52,9 @@ addopts = [
 MLFLOW_URL = { value = "http://localhost:30246", skip_if_set = true }
 NODE_NAME = { value = "test", skip_if_set = true }
 DATA_PATH = { value = "common/data/iris.csv", skip_if_set = true }
+RABBIT_USERNAME = { value = "guest", skip_if_set = true }
+RABBIT_PASSWORD = { value = "guest", skip_if_set = true }
+RABBIT_HOST = { value = "localhost", skip_if_set = true }
 
 [tool.pytest_coverage.run]
 omit = ["tests/*"]

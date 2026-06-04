@@ -20,7 +20,7 @@ aio-pika = "^9.5.4"
 pytest-asyncio = "^0.25.3"
 docker = "^7.1.0"
 structlog = "^25.1.0"
-model-store-interface = {version = "0.3.0", extras = ["edge"]}
+model-store-interface = {version = ">=0.5.0", extras = ["edge"]}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"
