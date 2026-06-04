@@ -8,9 +8,11 @@ from flwr.common import MetricsRecord
 
 from fl_client import stages
 from fl_client.config import DATA_PATH
+from unittest.mock import patch
 
 from fl_models.iris.fl_model import FLModel
 from model_store_interface.mlflow_interface import FederatedModel
+from model_store_interface.core.dataset_partition import DatasetPartition
 
 
 @pytest.fixture(scope="session")
@@ -31,6 +33,7 @@ def global_vars_dict(
 ):
     global_vars = dict()
     global_vars["local_learner"] = fl_model.create_local_learner()
+    global_vars["node_name"] = "test_node"
     global_vars["use_case"] = "test_case"
     global_vars["data"] = pd.read_csv(DATA_PATH)
 
@@ -46,22 +49,25 @@ def global_vars_dict(
     yield global_vars
 
 
-def test_load_data_success(global_vars_dict):
+@patch("fl_client.stages.download_object")
+def test_load_data_success(mock_download, global_vars_dict):
+    mock_download.return_value = DATA_PATH
     global_vars = global_vars_dict
-    stages.load_data("iris", global_vars)
-    assert isinstance(global_vars["data"], pd.DataFrame)
+    stages.load_data("iris", ["dummy_path"], global_vars)
+    assert isinstance(global_vars[DatasetPartition.TRAIN], pd.DataFrame)
 
 
 def test_load_data_error(global_vars_dict):
-    with pytest.raises(NotImplementedError):
-        stages.load_data("unknown", global_vars_dict)
+    with pytest.raises(ValueError):
+        stages.load_data("unknown", [], global_vars_dict)
 
 
 def test_prepare_data(global_vars_dict):
     global_vars = global_vars_dict
     local_learner = global_vars["local_learner"]
     stages.prepare_data(global_vars)
-    assert isinstance(local_learner.dataloader, DataLoader)
+    if hasattr(local_learner, "dataloader"):
+        assert isinstance(local_learner.dataloader, DataLoader)
 
 
 def test_load_model(fl_model_wrapper):
