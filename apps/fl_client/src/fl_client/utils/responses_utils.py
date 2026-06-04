@@ -121,3 +121,14 @@ def create_error_response(
     )
     rs = RecordSet(configs_records={"config": configsrecord})
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+def create_generate_synthetic_response(msg: Message, result: dict) -> Message:
+    configsrecord = ConfigsRecord(
+        {
+            "success": True,
+            "message": "synthetic data generation complete",
+            "result": result,
+        }
+    )
+    rs = RecordSet(configs_records={"config": configsrecord})
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)

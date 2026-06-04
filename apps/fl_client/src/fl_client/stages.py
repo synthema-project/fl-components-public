@@ -4,14 +4,13 @@ import grpc
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
 import structlog
-from fl_client.config import DATA_PATH
-from fl_client.config import DATA_PATH_AML
-
-from interfaces import mlflow_client
-from fl_client.SMPCClient import SMPCClient
 from fl_client import smpc_pb2
-from fl_client.utils.minio_loader import download_object
-
+from fl_client.SMPCClient import SMPCClient
+from fl_client.utils.minio_loader import download_object, upload_file
+import json
+import tempfile
+import os
+from interfaces import mlflow_client
 logger = structlog.get_logger()
 def set_run_config(
     experiment_id: str,
@@ -45,13 +44,36 @@ def load_data(
     dataframes = []
 
     for object_path in dataset_paths:
-        local_file = download_object(object_path)
-        df = pd.read_csv(local_file)
-        dataframes.append(df)
+        # Support partitioned dataset paths of the form "partition:path",
+        # e.g. "train:s3://bucket/train.csv". If no partition prefix is
+        # provided we keep old behavior and concatenate everything.
+        if ":" in object_path and not object_path.startswith("s3://"):
+            # interpret as partition:path
+            partition, path = object_path.split(":", 1)
+            local_file = download_object(path)
+            df = pd.read_csv(local_file)
+            # store per-partition in dataset_partitions dict
+            if "dataset_partitions" not in global_vars:
+                global_vars["dataset_partitions"] = {}
+            global_vars["dataset_partitions"][partition] = df
+        else:
+            local_file = download_object(object_path)
+            df = pd.read_csv(local_file)
+            dataframes.append(df)
 
-    dataset = pd.concat(dataframes, ignore_index=True)
-
-    global_vars["dataset"] = dataset
+    # If we collected unlabeled dataframes, concatenate them as the default
+    # dataset. Also keep per-partition mapping available in global_vars.
+    if dataframes:
+        dataset = pd.concat(dataframes, ignore_index=True)
+        global_vars["dataset"] = dataset
+    else:
+        # If no unlabeled dataframes were provided, try to build a global
+        # dataset from available partitions (concatenate all partitions).
+        partitions = global_vars.get("dataset_partitions", {})
+        if partitions:
+            global_vars["dataset"] = pd.concat(list(partitions.values()), ignore_index=True)
+        else:
+            global_vars["dataset"] = pd.DataFrame()
     global_vars["use_case"] = use_case
 
 
@@ -221,3 +243,137 @@ def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     except TimeoutError as e:
         logger.error(f"Client {smpc_client.client_id} failed to receive all shares: {e}")
         return None
+
+def generate_synthetic_and_upload(global_vars: dict,
+                                  n_samples: int,
+                                  sdg_model_name: str,
+                                  dataset_meta_json: str = "",
+                                  upload_to_s3: bool = True,
+                                  s3_bucket: str = "synthetic-data-for-inference",
+                                  create_s3_bucket_if_missing: bool = False,
+                                  real_data_partition: str = "test") -> dict:
+    """Generate synthetic data using local_learner, run validations and upload artifacts to MinIO.
+
+    Returns a dictionary with uploaded object URIs and local paths.
+    """
+    local_learner = global_vars.get("local_learner")
+    node_name = global_vars.get("node_name")
+    use_case = global_vars.get("use_case") or "unknown"
+    node_id = node_name
+
+    if local_learner is None:
+        raise RuntimeError("Local learner not initialized on client")
+
+    # Prepare dataset_meta
+    dataset_meta_obj = None
+    try:
+        if dataset_meta_json:
+            # Try to import DatasetMeta from model_store_interface
+            try:
+                from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+                dataset_meta_obj = DatasetMeta.model_validate_json(dataset_meta_json)
+            except Exception:
+                # Fallback to plain dict
+                dataset_meta_obj = json.loads(dataset_meta_json)
+        else:
+            # Build a simple metadata inference from local dataset
+            dataset = global_vars.get("dataset")
+            if dataset is None:
+                raise RuntimeError("No local dataset available to infer metadata")
+            # Minimal metadata: title and variables
+            cols = list(dataset.columns)
+            variables = [{"name": c, "type": "numeric"} for c in cols]
+            dataset_meta_obj = {"title": f"inferred_{use_case}", "variables": variables, "use_case": use_case}
+    except Exception as e:
+        raise RuntimeError(f"Failed to prepare dataset_meta: {e}")
+
+    # Generate synthetic data
+    try:
+        synthetic_df = local_learner.generate_synthetic_data(n_samples, dataset_meta_obj)
+    except Exception as e:
+        raise RuntimeError(f"Local learner failed to generate synthetic data: {e}")
+
+    # Validation
+    utility_report_html = None
+    privacy_report_html = None
+    try:
+        from model_store_interface.validation import validate_utility_report, validate_privacy_report
+        # Prefer using a specific real-data partition for validation if available.
+        partitions = global_vars.get("dataset_partitions", {})
+        if real_data_partition and partitions and real_data_partition in partitions:
+            real_data = partitions[real_data_partition]
+        else:
+            real_data = global_vars.get("dataset")
+        # These functions expect DatasetMeta model in many cases; try to pass object or dict
+        utility_report_html = validate_utility_report(synthetic_df, real_data, dataset_meta_obj, node_id)
+        privacy_report_html = validate_privacy_report(synthetic_df, real_data, dataset_meta_obj, node_id)
+    except Exception as e:
+        # If either validation fails, embed the error in the HTML placeholder
+        if utility_report_html is None:
+            utility_report_html = f"<html><body><pre>Utility validation failed: {e}</pre></body></html>"
+        if privacy_report_html is None:
+            privacy_report_html = f"<html><body><pre>Privacy validation failed: {e}</pre></body></html>"
+
+    # Persist artifacts locally
+    tmpdir = tempfile.mkdtemp(prefix="synthetic_")
+    data_fname = os.path.join(tmpdir, "data.csv")
+    meta_fname = os.path.join(tmpdir, "dataset_meta.json")
+    util_fname = os.path.join(tmpdir, "utility_report.html")
+    priv_fname = os.path.join(tmpdir, "privacy_report.html")
+
+    synthetic_df.to_csv(data_fname, index=False)
+
+    # dataset_meta_obj may be pydantic; ensure serializable
+    try:
+        if hasattr(dataset_meta_obj, 'model_dump'):
+            meta_json = dataset_meta_obj.model_dump_json(exclude_none=True)
+        else:
+            meta_json = json.dumps(dataset_meta_obj)
+    except Exception:
+        meta_json = json.dumps(dataset_meta_obj)
+
+    with open(meta_fname, 'w') as f:
+        f.write(meta_json)
+
+    with open(util_fname, 'w') as f:
+        f.write(utility_report_html or "")
+
+    with open(priv_fname, 'w') as f:
+        f.write(privacy_report_html or "")
+
+    result = {
+        "local_paths": {
+            "data": data_fname,
+            "meta": meta_fname,
+            "utility_report": util_fname,
+            "privacy_report": priv_fname,
+        },
+        "s3_uris": {}
+    }
+
+    # Upload to S3/MinIO if requested
+    if upload_to_s3:
+        # Build prefix
+        prefix = f"{use_case}/{sdg_model_name}/{node_name}"
+        data_key = f"{prefix}/data.csv"
+        meta_key = f"{prefix}/dataset_meta.json"
+        util_key = f"{prefix}/utility_report.html"
+        priv_key = f"{prefix}/privacy_report.html"
+
+        try:
+            upload_file(data_fname, s3_bucket, data_key)
+            upload_file(meta_fname, s3_bucket, meta_key)
+            upload_file(util_fname, s3_bucket, util_key)
+            upload_file(priv_fname, s3_bucket, priv_key)
+
+            result["s3_uris"] = {
+                "data": f"s3://{s3_bucket}/{data_key}",
+                "meta": f"s3://{s3_bucket}/{meta_key}",
+                "utility_report": f"s3://{s3_bucket}/{util_key}",
+                "privacy_report": f"s3://{s3_bucket}/{priv_key}",
+            }
+        except Exception as e:
+            # Upload failed, include error in result
+            result["s3_upload_error"] = str(e)
+
+    return result

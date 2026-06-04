@@ -318,3 +318,107 @@ def connect_peers(
         all_replies.extend(partial_replies)
 
     return [msg.content.configs_records['config']['peers'] for msg in all_replies]
+
+def generate_synthetic_data(
+    driver: Driver,
+    node_ids: list[int],
+    use_case: str,
+    n_samples: int,
+    sdg_model_name: str,
+    dataset_meta_json: str = "",
+    upload_to_s3: bool = True,
+    s3_bucket: str = "synthetic-data-for-inference",
+    create_s3_bucket_if_missing: bool = False,
+    real_data_partition: str = "test",
+    selected_node_only: bool = True,
+    selection_strategy: str = "random",
+):
+    """Instruct clients to generate synthetic data and optionally upload it to S3."""
+    # Optionally select a single node for pool generation
+    selected_node_ids = list(node_ids)
+
+    if selected_node_only and node_ids:
+        if selection_strategy == "random":
+            selected_node_ids = [choice(node_ids)]
+        elif selection_strategy == "best":
+            # Attempt to query the data catalogue for node capabilities. If the
+            # catalogue does not support node info, fall back to random selection.
+            try:
+                catalogue_client = DataCatalogueClient(base_url=config.DATA_CATALOGUE_URL)
+                # If the catalogue client exposes a method to fetch node info, use it.
+                if hasattr(catalogue_client, "get_node_info"):
+                    best_node = None
+                    best_score = -1
+                    for nid in node_ids:
+                        node_name = f"NODE{nid}"
+                        info = catalogue_client.get_node_info(node_name)
+                        # Support a few possible scoring keys
+                        score = 0
+                        if isinstance(info, dict):
+                            score = info.get("score") or info.get("cpu_cores") or info.get("cpu") or info.get("capacity") or 0
+                        try:
+                            s = float(score)
+                        except Exception:
+                            s = 0
+                        if s > best_score:
+                            best_score = s
+                            best_node = nid
+                    if best_node is not None:
+                        selected_node_ids = [best_node]
+                    else:
+                        selected_node_ids = [choice(node_ids)]
+                else:
+                    selected_node_ids = [choice(node_ids)]
+            except Exception:
+                selected_node_ids = [choice(node_ids)]
+        else:
+            # Unknown strategy: fallback to random
+            selected_node_ids = [choice(node_ids)]
+
+    # Run the execution flow but don't force global failure — collect partial results
+    replies = execution_flow(
+        driver=driver,
+        node_ids=selected_node_ids,
+        recordset_factory=interfaces.recordset.create_generate_synthetic_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="generate_synthetic",
+        recordset_factory_args=(use_case, n_samples, sdg_model_name, dataset_meta_json, upload_to_s3, s3_bucket, create_s3_bucket_if_missing, real_data_partition),
+        check_success=False,
+    )
+
+    # Aggregate replies: extract per-node result (s3 URIs, local paths, errors)
+    aggregated = {"successes": [], "failures": []}
+
+    for msg in replies:
+        try:
+            cfg = msg.content.configs_records.get("config", {})
+        except Exception:
+            cfg = {}
+
+        success = cfg.get("success", False)
+        result = cfg.get("result")
+
+        # Try to determine node id/source for this reply
+        node_src = None
+        if hasattr(msg, "src_node_id"):
+            node_src = getattr(msg, "src_node_id")
+        else:
+            # Try to parse node from s3 path if available
+            if isinstance(result, dict):
+                data_uri = result.get("s3_uris", {}).get("data") or result.get("s3_data_uri")
+                if isinstance(data_uri, str):
+                    parts = data_uri.split("/")
+                    if len(parts) >= 2:
+                        # assume node name is the second-to-last path element if prefix used
+                        node_src = parts[-2]
+
+        entry = {"node": node_src, "success": success, "result": result, "raw_config": cfg}
+        if success:
+            aggregated["successes"].append(entry)
+        else:
+            # include message text if available
+            message_text = cfg.get("message") if isinstance(cfg, dict) else None
+            aggregated["failures"].append({**entry, "message": message_text})
+
+    return aggregated
+
