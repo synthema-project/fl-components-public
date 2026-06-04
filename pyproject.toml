@@ -1,3 +1,21 @@
+[project]
+name = "fl-global"
+version = "0.2.0"
+description = "A global venv for running format and lint tools"
+authors = [
+    { name = "Borja Arroyo Galende", email = "borja.arroyog@upm.es" },
+    { name = "Andoni Beristain Iraola", email = "aberistain@vicomtech.org" },
+]
+requires-python = ">=3.11,<3.12"
+
+dependencies = [
+    "docker>=7.1.0"
+]
+
+[tool.uv]
+package = false
+
+
 # Poetry
 [tool.poetry]
 name = "fl-global"
@@ -10,7 +28,7 @@ package-mode = false
 version = "0.0.0"
 
 [tool.poetry.dependencies]
-python = "^3.11.0"
+python = ">=3.11,<3.12"
 docker = "^7.1.0"
 
 [tool.poetry.group.dev.dependencies]
@@ -37,5 +55,9 @@ enable = true
 
 # Build system
 [build-system]
-requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
-build-backend = "poetry_dynamic_versioning.backend"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# FIXME: return to poetry
+# requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
+# build-backend = "poetry_dynamic_versioning.backend"
