@@ -1,29 +1,33 @@
-from typing import Any, List, Dict
 import inspect
 import io
-import numpy as np
-import grpc
-import pandas as pd
-from flwr.common import MetricsRecord, ParametersRecord
-import structlog
+from typing import Any, List, Dict
 
+import grpc
+import numpy as np
+import pandas as pd
+import structlog
+from flwr.common import MetricsRecord, ParametersRecord
 from interfaces import mlflow_client
-from fl_client.SMPCClient import SMPCClient
+from model_store_interface import validation
+from model_store_interface.core.dataset_partition import DatasetPartition
+from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+
 from fl_client import smpc_pb2
+from fl_client.SMPCClient import SMPCClient
 from fl_client.utils.minio_loader import download_object
 
 # Import the strict MLOps partitioning enum
-from model_store_interface.core.dataset_partition import DatasetPartition
-from model_store_interface.validation import validate_utility_report, validate_privacy_report
 
 logger = structlog.get_logger()
+
+
 def set_run_config(
-    experiment_id: str,
-    parent_run_id: str,
-    node_name: str,
-    model_name: str,
-    model_version: int,
-    data_path: str,
+        experiment_id: str,
+        parent_run_id: str,
+        node_name: str,
+        model_name: str,
+        model_version: int,
+        data_path: str,
 ) -> None:
     if mlflow_client.mlflow.active_run():
         mlflow_client.mlflow.end_run("FAILED")
@@ -37,7 +41,7 @@ def set_run_config(
 
 
 def load_data(
-    use_case: str, dataset_paths: list[str], global_vars: dict
+        use_case: str, dataset_paths: list[str], global_vars: dict
 ) -> None:
     """Loads and mathematically partitions the clinical tabular data."""
     if not dataset_paths:
@@ -95,7 +99,7 @@ def prepare_data(global_vars: dict) -> None:
 
 
 def load_model(
-    global_vars: dict,
+        global_vars: dict,
 ) -> None:
     mlf_model = mlflow_client.load_model()
     global_vars["model"] = mlf_model
@@ -105,8 +109,8 @@ def load_model(
 
 
 def train_model(
-    global_vars: dict,
-    current_global_iter: int,
+        global_vars: dict,
+        current_global_iter: int,
 ) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
     if hasattr(local_learner, "train_round"):
@@ -147,7 +151,7 @@ def evaluate_model(global_vars: dict) -> MetricsRecord:
 
 
 def get_model_parameters(
-    global_vars: dict,
+        global_vars: dict,
 ) -> ParametersRecord:
     local_learner = global_vars["local_learner"]
     parameters = local_learner.get_parameters()
@@ -160,19 +164,20 @@ def set_model_parameters(parameters: ParametersRecord, global_vars: dict) -> Non
     local_learner = global_vars["local_learner"]
     local_learner.set_parameters(parameters)
 
-def set_dp_config(dp_params:dict, global_vars:dict):
+
+def set_dp_config(dp_params: dict, global_vars: dict):
     global_vars["dp_config"] = dp_params
 
 
-
 def upload_model(
-    latest_parameters: ParametersRecord,
-    global_vars: dict,
+        latest_parameters: ParametersRecord,
+        global_vars: dict,
 ) -> dict[str, Any]:
     local_learner = global_vars["local_learner"]
     set_model_parameters(latest_parameters, global_vars)
     model_info: dict[str, Any] = mlflow_client.upload_final_state(local_learner)
     return model_info
+
 
 def clean_current_config() -> None:
     mlflow_client.clean_current_config()
@@ -200,54 +205,80 @@ def generate_synthetic_data(n_samples: int, global_vars: dict) -> str:
     return df.to_csv(index=False)
 
 
-def validate_synthetic_data(synthetic_csv: str, global_vars: dict) -> dict:
-    """Run utility and privacy validation against the node's TEST partition.
-
-    Args:
-        synthetic_csv: CSV string produced by ``generate_synthetic_data``.
-        global_vars: Shared node state containing ``dataset_meta`` and test data.
-
-    Returns:
-        Dict with keys ``utility_report`` and ``privacy_report`` (HTML strings).
-
-    Raises:
-        ValueError: If required resources are missing from ``global_vars``.
+def validate_synthetic_data(synthetic_csv: str, global_vars: dict) -> dict[str, str]:
     """
-    dataset_meta = global_vars.get("dataset_meta")
-    real_data: pd.DataFrame | None = global_vars.get(DatasetPartition.TEST)
+    Run utility and privacy validation against the node's TEST partition.
+    Utilises the strictly typed DatasetMeta object to securely route plugins.
+    """
+    logger.info("Initiating Phase 4: Strict DCAT-AP post-training federated validation.")
 
-    if dataset_meta is None:
-        raise ValueError("dataset_meta is not available in global_vars; cannot validate synthetic data")
-    if real_data is None:
-        raise ValueError("TEST partition is not available in global_vars; cannot validate synthetic data")
+    # EXTRACT HYDRATED OBJECT: No string parsing required
+    meta: DatasetMeta | None = global_vars.get("dataset_meta")
 
-    node_name = global_vars.get("node_name", "unknown")
-    synthetic_data = pd.read_csv(io.StringIO(synthetic_csv))
+    if not meta:
+        logger.error("CRITICAL: No hydrated DatasetMeta found in global_vars. Aborting validation.")
+        return {"utility": "", "privacy": ""}
 
-    utility_report = validate_utility_report(synthetic_data, real_data, dataset_meta, node_id=node_name)
-    privacy_report = validate_privacy_report(synthetic_data, real_data, dataset_meta, node_id=node_name)
+    try:
+        # 1. Parse the incoming generative 'Big Pool' payload
+        synthetic_data = pd.read_csv(io.StringIO(synthetic_csv))
 
-    return {"utility_report": utility_report, "privacy_report": privacy_report}
+        # 2. Extract the local 20% hold-out real data partition
+        real_data = global_vars[DatasetPartition.TEST]
+
+        logger.info(
+            f"Executing clinical validation plugins for domain {meta.use_case.value} "
+            f"against {len(real_data)} real samples."
+        )
+
+        # 3. Execute DevSecOps validation plugins (aml-u, scd-u, sba-priv)
+        utility_report = validation.validate_utility_report(
+            synthetic_data=synthetic_data,
+            real_data=real_data,
+            dataset_meta=meta,
+            node_id=global_vars["node_name"]
+        )
+
+        privacy_report = validation.validate_privacy_report(
+            synthetic_data=synthetic_data,
+            real_data=real_data,
+            dataset_meta=meta,
+            node_id=global_vars["node_name"]
+        )
+
+        return {
+            "utility": utility_report,
+            "privacy": privacy_report
+        }
+
+    except Exception as e:
+        logger.error(f"Catastrophic failure during synthetic data validation: {e}")
+        return {"utility": "", "privacy": ""}
+
 
 def start_P2P_server(client_id: int, port: int, global_vars: dict) -> SMPCClient:
     smpc_client = SMPCClient(client_id, port)
     global_vars["smpc_client"] = smpc_client
     return smpc_client
 
+
 def set_discovered_peers(discovered_peers: List[str], discovered_peers_ids: List[str], global_vars: dict) -> List[str]:
     global_vars['discovered_peers'] = discovered_peers
     global_vars['discovered_peers_ids'] = discovered_peers_ids
     return discovered_peers
 
+
 def set_SMPC_enabled(SMPC_enabled: bool, global_vars: dict) -> bool:
     global_vars["SMPC_enabled"] = SMPC_enabled
     return SMPC_enabled
+
 
 def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
     smpc_client = global_vars["smpc_client"]
     peer_stubs = smpc_client.connect_to_peers(discovered_peers)
     global_vars["peer_stubs"] = peer_stubs
     return peer_stubs
+
 
 def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
                          peer_stubs: Dict[str, Any],
@@ -298,6 +329,7 @@ def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
                 logger.error(f"Unexpected response from peer {node_names[peer_node_name]}: {response.status}")
         except grpc.RpcError as e:
             logger.error(f"Failed to send shares to peer {node_names[peer_node_name]}: {e}")
+
 
 def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     try:
