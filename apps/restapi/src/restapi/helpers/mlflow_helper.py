@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import HTTPException, Depends
 from pydantic import BaseModel
 from restapi.auth import get_current_user, require_authentication, UserClaims
 from requests.auth import HTTPBasicAuth

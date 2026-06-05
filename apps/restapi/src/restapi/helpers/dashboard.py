@@ -1,18 +1,15 @@
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi_keycloak.model import KeycloakUser
-from typing import Optional, List
+from fastapi import Depends
+from typing import List
 
-from restapi.auth import keycloak, get_current_user, UserClaim
+from restapi.auth import get_current_user
 from restapi.helpers.mlflow_helper import (
     create_user as mlflow_create_user,
     get_user as mlflow_get_user,
-    update_password as mlflow_update_password,
-    update_admin as mlflow_update_admin,
-    delete_user as mlflow_delete_user
+    update_admin as mlflow_update_admin
 )
 
-from restapi.routers.keycloak_admin import get_keycloak_user_by_username, add_group_to_user, add_roles_to_user, get_group_by_name
+from restapi.routers.keycloak_admin import get_keycloak_user_by_username
 
 
 # ------------------ SCHEMAS ------------------ #

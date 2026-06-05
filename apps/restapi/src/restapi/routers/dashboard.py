@@ -1,13 +1,11 @@
-from pydantic import BaseModel
-from fastapi import APIRouter, Response, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from restapi.auth import UserClaims, require_authentication
-from restapi.helpers.mlflow_helper import get_experiment_id_by_name, get_experiment, get_run_by_name, get_child_runs_by_name, get_full_model_info_by_name, get_model_versions_by_name, set_mlflow_admin_permission
-from restapi.helpers.dashboard import CreateUserRequest, MLFlowUserCreateRequest, UpdatePasswordRequest
+from restapi.helpers.mlflow_helper import get_experiment_id_by_name, get_run_by_name, get_child_runs_by_name, get_full_model_info_by_name, get_model_versions_by_name, set_mlflow_admin_permission
+from restapi.helpers.dashboard import CreateUserRequest, UpdatePasswordRequest
 from restapi.helpers.dashboard import create_user, delete_user, update_user_password
-from restapi.routers.tasks import get_task_by_id
-from schemas.task import TaskCreate, TaskRead, TaskStatus
+from schemas.task import TaskRead
 from restapi.db import get_session
 from sqlalchemy.ext.asyncio import AsyncSession
 

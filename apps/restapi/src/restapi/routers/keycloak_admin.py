@@ -1,8 +1,8 @@
 from typing import Optional, List
 
 from pydantic import BaseModel
-from fastapi import APIRouter,FastAPI, HTTPException, Depends
-from restapi.auth import keycloak, get_current_user, get_current_user_with_restricted_role, KEYCLOAK_SERVER_URL, oauth2_scheme, get_admin_token, get_group_members
+from fastapi import APIRouter,HTTPException, Depends
+from restapi.auth import keycloak, get_current_user, get_current_user_with_restricted_role, KEYCLOAK_SERVER_URL, get_admin_token, get_group_members
 import requests
 
 

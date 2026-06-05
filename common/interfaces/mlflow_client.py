@@ -11,7 +11,6 @@ from mlflow.data.http_dataset_source import HTTPDatasetSource
 
 from .utils import ensure_bool, MutableBoolean
 import requests
-import os
 
 mlflow.set_system_metrics_sampling_interval(0.5)
 

@@ -8,7 +8,6 @@ from flwr.common import MetricsRecord
 
 from fl_client import stages
 from fl_client.config import DATA_PATH
-from unittest.mock import patch
 
 from fl_models.iris.fl_model import FLModel
 from model_store_interface.mlflow_interface import FederatedModel
