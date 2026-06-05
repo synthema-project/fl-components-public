@@ -8,7 +8,7 @@ from flwr.common.differential_privacy import (
     compute_clip_model_update,
 )
 from interfaces import recordset
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+from model_store_interface.core.schemas.dataset_meta import DatasetMeta, UseCase
 
 from fl_client import stages
 from fl_client.utils import peer_discovery
@@ -147,6 +147,10 @@ def set_run_config_if(msg: Message, global_vars: dict) -> Message:
         try:
             # Deserialise the string into the type-safe Python >=3.11 object
             dataset_meta = DatasetMeta.model_validate_json(dataset_meta_json)
+            if isinstance(dataset_meta.use_case, str):
+                dataset_meta = dataset_meta.model_copy(
+                    update={"use_case": UseCase(dataset_meta.use_case)}
+                )
             global_vars["dataset_meta"] = dataset_meta
 
             # Safely log the enum value to guarantee type alignment
@@ -263,8 +267,8 @@ def validate_synthetic_data_if(msg: Message, global_vars: dict) -> Message:
 
     configs = ConfigsRecord({
         "success": True,
-        "utility_report": reports["utility_report"],
-        "privacy_report": reports["privacy_report"],
+        "utility": reports["utility"],
+        "privacy": reports["privacy"],
     })
     rs = RecordSet(configs_records={"config": configs})
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
