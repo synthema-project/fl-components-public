@@ -21,6 +21,14 @@ from fl_client.utils.minio_loader import download_object
 logger = structlog.get_logger()
 
 
+def validate_utility_report(*args, **kwargs):
+    return validation.validate_utility_report(*args, **kwargs)
+
+
+def validate_privacy_report(*args, **kwargs):
+    return validation.validate_privacy_report(*args, **kwargs)
+
+
 def set_run_config(
         experiment_id: str,
         parent_run_id: str,
@@ -232,14 +240,14 @@ def validate_synthetic_data(synthetic_csv: str, global_vars: dict) -> dict[str, 
         )
 
         # 3. Execute DevSecOps validation plugins (aml-u, scd-u, sba-priv)
-        utility_report = validation.validate_utility_report(
+        utility_report = validate_utility_report(
             synthetic_data=synthetic_data,
             real_data=real_data,
             dataset_meta=meta,
             node_id=global_vars["node_name"]
         )
 
-        privacy_report = validation.validate_privacy_report(
+        privacy_report = validate_privacy_report(
             synthetic_data=synthetic_data,
             real_data=real_data,
             dataset_meta=meta,
