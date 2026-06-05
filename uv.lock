@@ -1939,6 +1939,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "mypy" },
     { name = "pip-licenses" },
     { name = "pytest" },
@@ -1965,6 +1966,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "mypy", specifier = ">=1.10,<2" },
     { name = "pip-licenses", specifier = ">=5.0.0,<6" },
     { name = "pytest", specifier = ">=8.2,<9" },
