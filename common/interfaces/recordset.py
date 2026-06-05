@@ -14,10 +14,9 @@ def read_filter_clients_recordset(recordset: RecordSet) -> str:
 
 
 def create_load_data_recordset(
-    use_case: str,
-    dataset_paths: list[str],
+        use_case: str,
+        dataset_paths: list[str],
 ) -> RecordSet:
-
     configsrecord = ConfigsRecord(
         {
             "mode": "load_data",
@@ -112,7 +111,7 @@ def read_set_parameters_recordset(recordset: RecordSet) -> ParametersRecord:
 
 
 def create_set_run_cfg_recordset(
-    experiment_id: str, run_id: str, model_name: str, model_version: int, dataset_meta_json: str | None = None
+        experiment_id: str, run_id: str, model_name: str, model_version: int, dataset_meta_json: str | None = None
 ) -> RecordSet:
     config_dict = {
         "mode": "set_run_config",
@@ -129,22 +128,38 @@ def create_set_run_cfg_recordset(
         configs_records={"config": configsrecord},
     )
 
+
 def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
+    """Safely unpacks the MLflow tracking IDs and the DCAT-AP Data Contract."""
     experiment_id = recordset.configs_records["config"]["experiment_id"]
     parent_run_id = recordset.configs_records["config"]["run_id"]
     model_name = recordset.configs_records["config"]["model_name"]
     model_version = recordset.configs_records["config"]["model_version"]
-    dataset_meta_json = recordset.configs_records["config"].get("dataset_meta_json", None)
 
-    if (
-        not isinstance(experiment_id, str)
-        or not isinstance(parent_run_id, str)
-        or not isinstance(model_name, str)
-        or not isinstance(model_version, int)
-    ):
+    if not isinstance(experiment_id, str):
         raise TypeError(
-            "experiment_id, parent_run_id, model_name must be strings and model_version must be an integer"
+            f"experiment_id must be a string, received {type(experiment_id)}"
         )
+    if not isinstance(parent_run_id, str):
+        raise TypeError(
+            f"run_id must be a string, received {type(parent_run_id)}"
+        )
+    if not isinstance(model_name, str):
+        raise TypeError(
+            f"model_name must be a string, received {type(model_name)}"
+        )
+    if not isinstance(model_version, int):
+        raise TypeError(
+            f"model_version must be an integer, received {type(model_version)}"
+        )
+
+    # Extract the serialised schema (Defaults to None for legacy tasks)
+    dataset_meta_json = recordset.configs_records["config"].get("dataset_meta_json", None)
+    if dataset_meta_json is not None and not isinstance(dataset_meta_json, str):
+        raise TypeError(
+            f"dataset_meta_json must be a string if provided, received {type(dataset_meta_json)}"
+        )
+
     return {
         "experiment_id": experiment_id,
         "parent_run_id": parent_run_id,
@@ -153,6 +168,7 @@ def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
         "dataset_meta_json": dataset_meta_json,
     }
 
+
 def read_start_P2P_server_recordset(recordset: RecordSet) -> dict:
     port = recordset.configs_records["config"]["port"]
     if not isinstance(port, int):
@@ -160,6 +176,7 @@ def read_start_P2P_server_recordset(recordset: RecordSet) -> dict:
     return {
         "port": port,
     }
+
 
 def read_discover_peers_recordset(recordset: RecordSet) -> dict:
     min_peers = recordset.configs_records["config"]["min_peers"]
@@ -176,8 +193,10 @@ def read_discover_peers_recordset(recordset: RecordSet) -> dict:
         "client_port": client_port,
         "max_discovery_time": max_discovery_time
     }
+
+
 def create_set_dp_cfg_recordset(
-    dp_mode: str, clipping_norm: int, noise_multiplier: int
+        dp_mode: str, clipping_norm: int, noise_multiplier: int
 ) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
@@ -191,14 +210,15 @@ def create_set_dp_cfg_recordset(
         configs_records={"config": configsrecord},
     )
 
+
 def read_set_dp_cfg_recordset(recordset: RecordSet) -> dict:
     dp_mode = recordset.configs_records["config"]["dp_mode"]
     clipping_norm = recordset.configs_records["config"]["clipping_norm"]
     noise_multiplier = recordset.configs_records["config"]["noise_multiplier"]
     if (
-        not isinstance(dp_mode, str)
-        or not isinstance(clipping_norm, int)
-        or not isinstance(noise_multiplier, int)
+            not isinstance(dp_mode, str)
+            or not isinstance(clipping_norm, int)
+            or not isinstance(noise_multiplier, int)
     ):
         raise TypeError(
             "dp_mode must be a string and clipping_norm and model version must be integera"
@@ -210,9 +230,8 @@ def read_set_dp_cfg_recordset(recordset: RecordSet) -> dict:
     }
 
 
-
 def create_train_model_recordset(
-    parametersrecord: ParametersRecord, current_global_iter: int
+        parametersrecord: ParametersRecord, current_global_iter: int
 ) -> RecordSet:
     return RecordSet(
         parameters_records={"parameters": parametersrecord},
@@ -251,6 +270,7 @@ def create_start_P2P_server_recordset(node_ids: list[int], port: int) -> RecordS
     )
     return RecordSet(configs_records={"config": configsrecord})
 
+
 def create_discover_peers_recordset(node_ids: list[int], client_port: int, max_discovery_time: int) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
@@ -262,15 +282,17 @@ def create_discover_peers_recordset(node_ids: list[int], client_port: int, max_d
     )
     return RecordSet(configs_records={"config": configsrecord})
 
+
 def create_connect_peers_recordset(node_ids: list[int], peers: list[list[str]]) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
             "mode": "connect_peers",
             "node_ids": node_ids,
-            "peers": peers # type: ignore
+            "peers": peers  # type: ignore
         }
     )
     return RecordSet(configs_records={"config": configsrecord})
+
 
 def create_set_smpc_enabled_recordset(smpc_enabled: bool) -> RecordSet:
     configsrecord = ConfigsRecord(
@@ -280,6 +302,7 @@ def create_set_smpc_enabled_recordset(smpc_enabled: bool) -> RecordSet:
         }
     )
     return RecordSet(configs_records={"config": configsrecord})
+
 
 def read_set_smpc_enabled_recordset(recordset: RecordSet) -> bool:
     smpc_enabled = recordset.configs_records["config"]["smpc_enabled"]
