@@ -61,7 +61,7 @@ def run_tests():
 
     # Global checks
     for tool in ["ruff check --fix", "ruff format"]:
-        run_command(f"poetry run {tool}", tool)
+        run_command(f"uv run {tool}", tool)
 
     print("=" * 67)
 
@@ -76,7 +76,7 @@ def run_tests():
         if image.get("test"):
             for test_cmd in ["pytest", "python -m mypy . --explicit-package-bases"]:
                 run_command(
-                    f"poetry run {test_cmd}", test_cmd, project=str(project_path)
+                    f"uv run {test_cmd}", test_cmd, project=str(project_path)
                 )
 
         os.chdir(script_dir)  # Restore working directory
@@ -107,8 +107,8 @@ def run_e2e_tests():
 
 def main():
     """Main function to execute test and e2e processes."""
-    if not shutil.which("poetry"):
-        handle_error("Poetry is not installed. Please install Poetry first.")
+    if not shutil.which("uv"):
+        handle_error("uv is not installed. Please install uv first.")
 
     run_tests()
     build_docker_images()  # New step before running e2e tests
