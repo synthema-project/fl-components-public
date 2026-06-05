@@ -1,12 +1,11 @@
 from typing import Any, List, Dict
 import inspect
+import io
 import numpy as np
 import grpc
 import pandas as pd
 from flwr.common import MetricsRecord, ParametersRecord
 import structlog
-from fl_client.config import DATA_PATH
-from fl_client.config import DATA_PATH_AML
 
 from interfaces import mlflow_client
 from fl_client.SMPCClient import SMPCClient
@@ -15,6 +14,7 @@ from fl_client.utils.minio_loader import download_object
 
 # Import the strict MLOps partitioning enum
 from model_store_interface.core.dataset_partition import DatasetPartition
+from model_store_interface.validation import validate_utility_report, validate_privacy_report
 
 logger = structlog.get_logger()
 def set_run_config(
@@ -176,6 +176,58 @@ def upload_model(
 
 def clean_current_config() -> None:
     mlflow_client.clean_current_config()
+
+
+def generate_synthetic_data(n_samples: int, global_vars: dict) -> str:
+    """Generate synthetic data using the local learner and return it as a CSV string.
+
+    Args:
+        n_samples: Number of synthetic rows to generate.
+        global_vars: Shared node state containing ``local_learner`` and ``dataset_meta``.
+
+    Returns:
+        CSV-encoded string of the synthetic DataFrame.
+
+    Raises:
+        ValueError: If ``dataset_meta`` is not present in ``global_vars``.
+    """
+    dataset_meta = global_vars.get("dataset_meta")
+    if dataset_meta is None:
+        raise ValueError("dataset_meta is not available in global_vars; cannot generate synthetic data")
+
+    local_learner = global_vars["local_learner"]
+    df: pd.DataFrame = local_learner.generate_synthetic_data(n_samples, dataset_meta)
+    return df.to_csv(index=False)
+
+
+def validate_synthetic_data(synthetic_csv: str, global_vars: dict) -> dict:
+    """Run utility and privacy validation against the node's TEST partition.
+
+    Args:
+        synthetic_csv: CSV string produced by ``generate_synthetic_data``.
+        global_vars: Shared node state containing ``dataset_meta`` and test data.
+
+    Returns:
+        Dict with keys ``utility_report`` and ``privacy_report`` (HTML strings).
+
+    Raises:
+        ValueError: If required resources are missing from ``global_vars``.
+    """
+    dataset_meta = global_vars.get("dataset_meta")
+    real_data: pd.DataFrame | None = global_vars.get(DatasetPartition.TEST)
+
+    if dataset_meta is None:
+        raise ValueError("dataset_meta is not available in global_vars; cannot validate synthetic data")
+    if real_data is None:
+        raise ValueError("TEST partition is not available in global_vars; cannot validate synthetic data")
+
+    node_name = global_vars.get("node_name", "unknown")
+    synthetic_data = pd.read_csv(io.StringIO(synthetic_csv))
+
+    utility_report = validate_utility_report(synthetic_data, real_data, dataset_meta, node_id=node_name)
+    privacy_report = validate_privacy_report(synthetic_data, real_data, dataset_meta, node_id=node_name)
+
+    return {"utility_report": utility_report, "privacy_report": privacy_report}
 
 def start_P2P_server(client_id: int, port: int, global_vars: dict) -> SMPCClient:
     smpc_client = SMPCClient(client_id, port)

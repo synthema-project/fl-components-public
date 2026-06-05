@@ -196,3 +196,40 @@ def evaluate_model_if(msg: Message, global_vars: dict) -> Message:
     metrics = stages.evaluate_model(global_vars)
     return responses_utils.create_evaluate_response(msg, metrics)
 
+
+def generate_synthetic_data_if(msg: Message, global_vars: dict) -> Message:
+    """Handle a QUERY message requesting synthetic data generation.
+
+    Reads ``n_samples`` from the incoming recordset, delegates to
+    ``stages.generate_synthetic_data``, and returns the CSV payload
+    in a ``ConfigsRecord`` under the key ``synthetic_csv``.
+    """
+    from flwr.common import ConfigsRecord, RecordSet, DEFAULT_TTL
+
+    n_samples = recordset.read_generate_synthetic_data_recordset(msg.content)
+    csv_str = stages.generate_synthetic_data(n_samples, global_vars)
+
+    configs = ConfigsRecord({"success": True, "synthetic_csv": csv_str})
+    rs = RecordSet(configs_records={"config": configs})
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+
+def validate_synthetic_data_if(msg: Message, global_vars: dict) -> Message:
+    """Handle a QUERY message requesting synthetic data validation.
+
+    Reads ``synthetic_csv`` from the incoming recordset, delegates to
+    ``stages.validate_synthetic_data``, and returns ``utility_report``
+    and ``privacy_report`` HTML strings in the reply ``ConfigsRecord``.
+    """
+    from flwr.common import ConfigsRecord, RecordSet, DEFAULT_TTL
+
+    csv_str = recordset.read_validate_synthetic_data_recordset(msg.content)
+    reports = stages.validate_synthetic_data(csv_str, global_vars)
+
+    configs = ConfigsRecord({
+        "success": True,
+        "utility_report": reports["utility_report"],
+        "privacy_report": reports["privacy_report"],
+    })
+    rs = RecordSet(configs_records={"config": configs})
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)

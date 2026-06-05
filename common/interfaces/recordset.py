@@ -299,3 +299,30 @@ def create_evaluate_recordset(parametersrecord: ParametersRecord) -> RecordSet:
 def read_evaluate_recordset(recordset: RecordSet) -> ParametersRecord:
     return recordset.parameters_records["parameters"]
 
+
+def create_generate_synthetic_data_recordset(n_samples: int) -> RecordSet:
+    """Create a recordset requesting synthetic data generation."""
+    configsrecord = ConfigsRecord({"mode": "generate_synthetic_data", "n_samples": n_samples})
+    return RecordSet(configs_records={"config": configsrecord})
+
+
+def read_generate_synthetic_data_recordset(recordset: RecordSet) -> int:
+    """Extract n_samples from a generate_synthetic_data recordset."""
+    n_samples = recordset.configs_records["config"]["n_samples"]
+    if not isinstance(n_samples, int):
+        raise TypeError(f"n_samples must be an integer, received {type(n_samples)}")
+    return n_samples
+
+
+def create_validate_synthetic_data_recordset(synthetic_csv: str) -> RecordSet:
+    """Create a recordset containing the synthetic CSV for validation."""
+    configsrecord = ConfigsRecord({"mode": "validate_synthetic_data", "synthetic_csv": synthetic_csv})
+    return RecordSet(configs_records={"config": configsrecord})
+
+
+def read_validate_synthetic_data_recordset(recordset: RecordSet) -> str:
+    """Extract the synthetic CSV string from a validate_synthetic_data recordset."""
+    synthetic_csv = recordset.configs_records["config"]["synthetic_csv"]
+    if not isinstance(synthetic_csv, str):
+        raise TypeError(f"synthetic_csv must be a string, received {type(synthetic_csv)}")
+    return synthetic_csv

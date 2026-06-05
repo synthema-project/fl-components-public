@@ -7,6 +7,7 @@ logger = structlog.get_logger()
 from fl_client.interface import (
     clean_config_if,
     filter_clients_if,
+    generate_synthetic_data_if,
     get_parameters_if,
     load_data_if,
     load_model_if,
@@ -22,7 +23,8 @@ from fl_client.interface import (
     train_model_SMPC_if,
     set_smpc_enabled_if,
     set_dp_config_if,
-    evaluate_model_if
+    evaluate_model_if,
+    validate_synthetic_data_if,
 )
 
 from interfaces.mlflow_client import setup_mlflow
@@ -41,7 +43,9 @@ global_vars = {
     "smpc_client": None,
     "discovered_peers": None,
     "discovered_peers_ids": None,
-    "dp_config": None
+    "dp_config": None,
+    "dataset_meta_json": None,
+    "dataset_meta": None,
 }
 
 setup_mlflow(MLFLOW_URL)
@@ -95,6 +99,13 @@ def query(msg: Message, ctx: Context) -> Message:
     elif mode == "connect_peers":
         # returns the peers and peer_stubs
         return connect_peers_if(msg, global_vars)
+
+    elif mode == "generate_synthetic_data":
+        return generate_synthetic_data_if(msg, global_vars)
+
+    elif mode == "validate_synthetic_data":
+        return validate_synthetic_data_if(msg, global_vars)
+
     else:
         raise NotImplementedError(f"Unknown mode: {mode}")
 
