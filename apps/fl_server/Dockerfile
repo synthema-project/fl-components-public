@@ -3,19 +3,19 @@ ARG BASE_IMAGE=fl-common
 
 FROM python:3.11-slim as builder
 
-RUN pip install poetry
-
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=1 \
-    POETRY_VIRTUALENVS_CREATE=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml ./
 RUN touch README.md
 
-RUN poetry install --no-root && rm -rf $POETRY_CACHE_DIR
+RUN uv venv .venv
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-install-project --group dev
 
 FROM ${BASE_IMAGE}:${CURRENT_VERSION} as runtime
 
