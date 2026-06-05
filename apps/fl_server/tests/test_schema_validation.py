@@ -40,3 +40,32 @@ def test_task_base_fields():
     assert "use_case" in fields
     assert "model_name" in fields
     assert "model_version" in fields
+
+
+def test_task_base_n_samples_synthetic_default():
+    """Verify that n_samples_synthetic safely defaults to 10000 for backward compatibility."""
+    task = TaskBase(
+        user_id="user_001",
+        use_case="AML",
+        model_name="aml_gmm",
+        model_version=1,
+        num_global_iterations=5,
+        run_name="run_aml",
+        experiment_name="AML_experiment"
+    )
+    assert task.n_samples_synthetic == 10000
+
+
+def test_task_base_n_samples_synthetic_override():
+    """Verify the researcher can dynamically request a custom Big Pool size."""
+    task = TaskBase(
+        user_id="user_001",
+        use_case="SCD",
+        model_name="scd_autoencoder",
+        model_version=1,
+        num_global_iterations=5,
+        run_name="run_scd",
+        experiment_name="SCD_experiment",
+        n_samples_synthetic=50000  # Massive pool request
+    )
+    assert task.n_samples_synthetic == 50000

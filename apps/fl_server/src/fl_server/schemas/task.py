@@ -33,6 +33,10 @@ class TaskBase(SQLModel):
     dataset_meta_json: Optional[str] = Field(
         default=None, description="Serialised DCAT-AP metadata schema"
     )
+    n_samples_synthetic: Optional[int] = Field(
+        default=10000,
+        description="The number of synthetic patient records to generate post-training"
+    )
 
     # --- Privacy / security configuration ---
     SMPC_enabled: bool = Field(
