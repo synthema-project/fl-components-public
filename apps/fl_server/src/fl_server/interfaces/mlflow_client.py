@@ -256,7 +256,6 @@ def log_metrics(
     mlflow.log_metrics(metrics, step=step)
 
 
-@ensure_bool(_configured)
 @ensure_bool(_initialized)
 def set_dataset_signature(node_name: str, path: str, run_id: str) -> None:
     """
@@ -270,3 +269,65 @@ def set_dataset_signature(node_name: str, path: str, run_id: str) -> None:
     source = HTTPDatasetSource(f"{node_name}://{path}")
     dataset = MetaDataset(source)  # type: ignore
     mlflow.log_input(dataset, "training")
+
+
+@ensure_bool(_initialized)
+def create_postprocessing_run(experiment_id: str, parent_run_id: str) -> str:
+    """Create a sibling MLflow run tagged as 'postprocessing'.
+
+    Args:
+        experiment_id (str): The experiment that owns the parent training run.
+        parent_run_id (str): The ID of the parent federated training run.
+
+    Returns:
+        str: The run ID of the newly created postprocessing run.
+    """
+    run = _mlflow_client.create_run(
+        experiment_id=experiment_id,
+        run_name="postprocessing",
+        tags={
+            MLFLOW_PARENT_RUN_ID: parent_run_id,
+            "type": "postprocessing",
+        },
+    )
+    return str(run.info.run_id)
+
+
+@ensure_bool(_initialized)
+def log_artifact_str(content: str, artifact_path: str, run_id: str) -> None:
+    """Log a string payload as an MLflow artifact on a specific run.
+
+    Writes *content* to a temporary file and uploads it under *artifact_path*
+    inside the given *run_id*'s artifact store.  The temporary file is always
+    removed afterwards.
+
+    Args:
+        content (str): Text content to upload.
+        artifact_path (str): Destination path within the run's artifact store
+            (e.g. ``"postprocessing/reports/node1_utility.html"``).
+        run_id (str): Target MLflow run ID.
+    """
+    import tempfile
+    import os
+
+    # Split artifact_path into directory and filename
+    artifact_dir = "/".join(artifact_path.split("/")[:-1]) if "/" in artifact_path else None
+    filename = artifact_path.split("/")[-1]
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=f"_{filename}", delete=False, encoding="utf-8") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        _mlflow_client.log_artifact(run_id, tmp_path, artifact_path=artifact_dir)
+    finally:
+        os.unlink(tmp_path)
+
+
+def finish_run(run_id: str) -> None:
+    """Mark an MLflow run as FINISHED.
+
+    Args:
+        run_id (str): The run ID to finish.
+    """
+    _mlflow_client.update_run(run_id, "FINISHED")

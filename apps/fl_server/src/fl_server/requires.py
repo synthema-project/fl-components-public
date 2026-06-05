@@ -341,3 +341,65 @@ def evaluate_model(
         for msg in all_replies
     ]
 
+
+def generate_synthetic_data(
+    driver: Driver,
+    node_ids: list[int],
+    n_samples: int,
+) -> dict[int, str]:
+    """Request synthetic data generation from selected nodes.
+
+    Args:
+        driver: Flower driver instance.
+        node_ids: IDs of the nodes to contact.
+        n_samples: Number of synthetic rows to request.
+
+    Returns:
+        Mapping of ``node_id -> synthetic CSV string`` for each node.
+    """
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_generate_synthetic_data_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="generate_synthetic_data",
+        recordset_factory_args=(n_samples,),
+        check_success=True,
+    )
+    return {
+        msg.metadata.dst_node_id: msg.content.configs_records["config"]["synthetic_csv"]
+        for msg in all_replies
+    }
+
+
+def validate_synthetic_data(
+    driver: Driver,
+    node_ids: list[int],
+    synthetic_csv: str,
+) -> dict[int, dict[str, str]]:
+    """Broadcast synthetic CSV to all nodes for federated validation.
+
+    Args:
+        driver: Flower driver instance.
+        node_ids: IDs of the nodes to contact.
+        synthetic_csv: CSV string of synthetic data generated on the elected node.
+
+    Returns:
+        Mapping of ``node_id -> {"utility_report": str, "privacy_report": str}``.
+    """
+    all_replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_validate_synthetic_data_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="validate_synthetic_data",
+        recordset_factory_args=(synthetic_csv,),
+        check_success=True,
+    )
+    return {
+        msg.metadata.dst_node_id: {
+            "utility_report": msg.content.configs_records["config"]["utility_report"],
+            "privacy_report": msg.content.configs_records["config"]["privacy_report"],
+        }
+        for msg in all_replies
+    }

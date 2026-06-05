@@ -211,7 +211,10 @@ def test_set_run_config_if_success(set_run_config_mock):
 
     rsp = interface.set_run_config_if(msg, global_vars)
 
-    assert len(global_vars.keys()) == 2
+    # set_run_config_if adds dataset_meta_json and dataset_meta to global_vars
+    assert len(global_vars.keys()) == 4
+    assert "dataset_meta_json" in global_vars
+    assert "dataset_meta" in global_vars
     assert set_run_config_mock.called
     assert "success" in rsp.content.configs_records["config"].keys()
     assert rsp.content.configs_records["config"]["success"]

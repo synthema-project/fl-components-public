@@ -1,5 +1,8 @@
 import asyncio
+import json
+import random
 from typing import cast
+import pandas as pd
 import structlog
 from flwr.common import Context, ParametersRecord
 from flwr.server import Driver, ServerApp
@@ -9,6 +12,8 @@ from fl_server.utils import mlflow_utils
 from fl_server.interfaces import mlflow_client
 from fl_server.schemas.task import TaskRead
 from fl_server.interfaces.rabbitmq_client import AsyncRabbitMQClient
+from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+from model_store_interface.catalogue_hook import publish_to_catalogue
 
 logger = structlog.get_logger()
 
@@ -139,6 +144,68 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
 
     logger.info("Uploading trained model")
     requires.upload_model(driver, filtered_node_ids, parameters)
+
+    if task.dataset_meta_json:
+        logger.info("Starting post-training validation pipeline")
+        try:
+            dataset_meta = DatasetMeta.model_validate(json.loads(task.dataset_meta_json))
+
+            # Open a sibling postprocessing MLflow run
+            experiment_id = str(mlflow_client._current_config.experiment_id)
+            parent_run_id = str(mlflow_client._current_config.parent_run_id)
+            post_run_id = mlflow_client.create_postprocessing_run(experiment_id, parent_run_id)
+
+            # Elect one node for synthetic data generation
+            generator_node_id = random.choice(filtered_node_ids)
+            logger.info("Generating synthetic data", generator_node=generator_node_id)
+            node_csvs = requires.generate_synthetic_data(driver, [generator_node_id], n_samples=1000)
+            synthetic_csv = list(node_csvs.values())[0]
+
+            # Broadcast synthetic CSV to all nodes for federated validation
+            logger.info("Broadcasting synthetic data for federated validation")
+            validation_results = requires.validate_synthetic_data(driver, filtered_node_ids, synthetic_csv)
+
+            # Collect per-node reports
+            utility_reports: dict = {}
+            privacy_reports: dict = {}
+            for node_id, reports in validation_results.items():
+                utility_reports[node_id] = reports["utility_report"]
+                privacy_reports[node_id] = reports["privacy_report"]
+                mlflow_client.log_artifact_str(
+                    reports["utility_report"],
+                    f"postprocessing/reports/{node_id}_utility.html",
+                    post_run_id,
+                )
+                mlflow_client.log_artifact_str(
+                    reports["privacy_report"],
+                    f"postprocessing/reports/{node_id}_privacy.html",
+                    post_run_id,
+                )
+
+            # Log synthetic CSV as artifact
+            mlflow_client.log_artifact_str(synthetic_csv, "postprocessing/synthetic_data.csv", post_run_id)
+
+            # Publish to data catalogue
+            import io
+            synthetic_data = pd.read_csv(io.StringIO(synthetic_csv))
+            publish_to_catalogue(
+                synthetic_data,
+                utility_reports,
+                privacy_reports,
+                dataset_meta,
+                experiment_name=task.experiment_name,
+            )
+
+            mlflow_client.finish_run(post_run_id)
+            logger.info("Post-training validation pipeline complete", post_run_id=post_run_id)
+
+        except Exception as exc:
+            logger.error("Post-training validation pipeline failed", error=str(exc))
+    else:
+        logger.warning(
+            "dataset_meta_json not provided; skipping post-training validation",
+            task_id=task.id,
+        )
 
     logger.info("Cleaning up MLflow configuration")
     mlflow_client.clean_current_config()

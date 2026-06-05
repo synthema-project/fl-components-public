@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flwr.common import (
     MessageType,
-    DEFAULT_TTL,
     Message,
     RecordSet,
     ParametersRecord,
@@ -231,7 +230,7 @@ def test_set_run_config(driver, node_ids):
         recordset_factory=interfaces.recordset.create_set_run_cfg_recordset,
         msg_type=MessageType.QUERY,
         msg_group="set_run_config",
-        recordset_factory_args=(experiment_id, run_id, model_name, model_version),
+        recordset_factory_args=(experiment_id, run_id, model_name, model_version, None),
         check_success=True,
     )
 

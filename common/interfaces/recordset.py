@@ -134,7 +134,7 @@ def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
     parent_run_id = recordset.configs_records["config"]["run_id"]
     model_name = recordset.configs_records["config"]["model_name"]
     model_version = recordset.configs_records["config"]["model_version"]
-    dataset_meta_json = recordset.configs_records["config"].get("dataset_meta_json")
+    dataset_meta_json = recordset.configs_records["config"].get("dataset_meta_json", None)
 
     if (
         not isinstance(experiment_id, str)
