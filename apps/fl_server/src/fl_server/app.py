@@ -32,6 +32,7 @@ async def configure_mlflow(task: TaskRead, driver: Driver, node_ids: list[int]) 
         parent_run_id,
         task.model_name,
         task.model_version,
+        task.dataset_meta_json,
     )
 
 

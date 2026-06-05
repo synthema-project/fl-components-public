@@ -32,7 +32,7 @@
 ---
 
 ### Phase 3: HealthDCAT-AP Metadata Propagation
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete
 **Objective**: Add `dataset_meta_json: Optional[str] = None` to `TaskBase` / `TaskCreate` / `TaskRead` (serialized `HealthDcatApDatasetMeta` — optional per ADR-001, backward-compatible). Pass it from the REST API dispatcher through RabbitMQ, into the FL server task, and down to the client via `ConfigsRecord` in the Flower message. The client deserializes it and makes it available for validation and publication calls. When `None`, skip post-training validation with a warning log.
 **Requirements**: REQ-03
 **Files**: `apps/fl_server/src/fl_server/schemas/task.py`, `apps/fl_server/src/fl_server/app.py`, `apps/fl_client/src/fl_client/stages.py`, `apps/restapi/...`

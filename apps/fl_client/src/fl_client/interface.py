@@ -1,6 +1,6 @@
 import threading
 from collections import OrderedDict
-from flwr.common import Message, parameters_to_ndarrays, Parameters
+from flwr.common import Message
 import structlog
 from fl_models.iris.utils import Utils
 from flwr.common.differential_privacy import (
@@ -124,7 +124,13 @@ def set_parameters_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_success_response(msg, "set parameters successfully")
 
 def set_run_config_if(msg: Message, global_vars: dict) -> Message:
+    import json
     content = recordset.read_set_run_cfg_recordset(msg.content)
+    dataset_meta_json = content.get("dataset_meta_json")
+    
+    global_vars["dataset_meta_json"] = dataset_meta_json
+    global_vars["dataset_meta"] = json.loads(dataset_meta_json) if dataset_meta_json else None
+
     stages.set_run_config(
         content["experiment_id"],
         content["parent_run_id"],

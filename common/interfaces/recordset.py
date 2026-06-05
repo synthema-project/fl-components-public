@@ -112,17 +112,19 @@ def read_set_parameters_recordset(recordset: RecordSet) -> ParametersRecord:
 
 
 def create_set_run_cfg_recordset(
-    experiment_id: str, run_id: str, model_name: str, model_version: int
+    experiment_id: str, run_id: str, model_name: str, model_version: int, dataset_meta_json: str | None = None
 ) -> RecordSet:
-    configsrecord = ConfigsRecord(
-        {
-            "mode": "set_run_config",
-            "experiment_id": experiment_id,
-            "run_id": run_id,
-            "model_name": model_name,
-            "model_version": model_version,
-        }
-    )
+    config_dict = {
+        "mode": "set_run_config",
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "model_name": model_name,
+        "model_version": model_version,
+    }
+    if dataset_meta_json is not None:
+        config_dict["dataset_meta_json"] = dataset_meta_json
+
+    configsrecord = ConfigsRecord(config_dict)
     return RecordSet(
         configs_records={"config": configsrecord},
     )
@@ -132,6 +134,8 @@ def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
     parent_run_id = recordset.configs_records["config"]["run_id"]
     model_name = recordset.configs_records["config"]["model_name"]
     model_version = recordset.configs_records["config"]["model_version"]
+    dataset_meta_json = recordset.configs_records["config"].get("dataset_meta_json")
+
     if (
         not isinstance(experiment_id, str)
         or not isinstance(parent_run_id, str)
@@ -146,6 +150,7 @@ def read_set_run_cfg_recordset(recordset: RecordSet) -> dict:
         "parent_run_id": parent_run_id,
         "model_name": model_name,
         "model_version": model_version,
+        "dataset_meta_json": dataset_meta_json,
     }
 
 def read_start_P2P_server_recordset(recordset: RecordSet) -> dict:

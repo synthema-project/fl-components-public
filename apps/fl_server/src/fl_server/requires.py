@@ -1,12 +1,9 @@
 from random import choice
-from typing import Callable
 import structlog
 from flwr.common import (
-    DEFAULT_TTL,
     MessageType,
     MetricsRecord,
     ParametersRecord,
-    Message,
 )
 from flwr.server import Driver
 
@@ -177,6 +174,7 @@ def set_run_config(
     run_id: str,
     model_name: str,
     model_version: int,
+    dataset_meta_json: str | None = None,
 ) -> None:
     execution_flow(
         driver=driver,
@@ -184,7 +182,7 @@ def set_run_config(
         recordset_factory=interfaces.recordset.create_set_run_cfg_recordset,
         msg_type=MessageType.QUERY,
         msg_group="set_run_config",
-        recordset_factory_args=(experiment_id, run_id, model_name, model_version),
+        recordset_factory_args=(experiment_id, run_id, model_name, model_version, dataset_meta_json),
         check_success=True,
     )
 
