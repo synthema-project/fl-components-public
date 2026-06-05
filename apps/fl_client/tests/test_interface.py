@@ -9,7 +9,7 @@ from flwr.common import (
     RecordSet,
     MetricsRecord,
 )
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+from model_store_interface.core.schemas.dataset_meta import DatasetMeta, UseCase, Variable
 
 from fl_client import interface
 
@@ -197,8 +197,17 @@ def test_set_run_config_if_edge_hydration(set_run_config_mock):
         data_path="/tmp/data.csv",
     )
 
-    # 1. The Raw Primitive (Simulating the RabbitMQ -> Flower network string)
-    valid_dcat_json = '{"title": "Test", "version": "1.0", "use_case": "SCD", "variables": []}'
+    # 1. The Mathematically Robust Payload
+    # Instantiating the object guarantees it conforms strictly to Pydantic validation
+    mock_meta = DatasetMeta(
+        title="Test SCD Dataset",
+        description="Mock validation schema",
+        version="1.0",
+        schema_version="v1",
+        use_case=UseCase.SCD,
+        variables=[Variable(name="HB", type="numeric", description="Hemoglobin", analysis_domain="clinical")]
+    )
+    valid_dcat_json = mock_meta.model_dump_json()
 
     configs_records = {
         "config": ConfigsRecord(
@@ -221,7 +230,7 @@ def test_set_run_config_if_edge_hydration(set_run_config_mock):
 
     # 3. MLOps Verification: Memory is now type-safe
     meta = global_vars.get("dataset_meta")
-    assert isinstance(meta, DatasetMeta)
+    assert isinstance(meta, DatasetMeta), "Payload was stripped by Pydantic validation exception!"
     assert meta.use_case.value == "SCD"
 
 
