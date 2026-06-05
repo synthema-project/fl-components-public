@@ -1,19 +1,21 @@
 import asyncio
+import io
 import json
 import random
 from typing import cast
+
 import pandas as pd
 import structlog
 from flwr.common import Context, ParametersRecord
 from flwr.server import Driver, ServerApp
+from model_store_interface.catalogue_hook import publish_to_catalogue
+from model_store_interface.core.schemas.dataset_meta import DatasetMeta
 
 from fl_server import requires, stages, config
-from fl_server.utils import mlflow_utils
 from fl_server.interfaces import mlflow_client
-from fl_server.schemas.task import TaskRead
 from fl_server.interfaces.rabbitmq_client import AsyncRabbitMQClient
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta
-from model_store_interface.catalogue_hook import publish_to_catalogue
+from fl_server.schemas.task import TaskRead
+from fl_server.utils import mlflow_utils
 
 logger = structlog.get_logger()
 
@@ -42,7 +44,7 @@ async def configure_mlflow(task: TaskRead, driver: Driver, node_ids: list[int]) 
 
 
 async def load_model_and_data(
-    task: TaskRead, driver: Driver, node_ids: list[int]
+        task: TaskRead, driver: Driver, node_ids: list[int]
 ) -> None:
     """Loads model and prepares data for training."""
     stages.load_model(config.global_vars)
@@ -50,25 +52,27 @@ async def load_model_and_data(
     requires.load_model(driver, node_ids, task.model_name, task.model_version)
     requires.prepare_data(driver, node_ids)
 
+
 async def set_SMPC_enabled(
-    task: TaskRead, driver: Driver, node_ids: list[int]
+        task: TaskRead, driver: Driver, node_ids: list[int]
 ) -> None:
     """Sets SMPC enabled flag for the task."""
     stages.set_SMPC_enabled(task.SMPC_enabled, config.global_vars)
     requires.set_SMPC_enabled(driver, node_ids, task.SMPC_enabled)
 
+
 async def set_dp_config(
-    task: TaskRead, driver: Driver, node_ids: list[int]
+        task: TaskRead, driver: Driver, node_ids: list[int]
 ) -> None:
-    stages.configure_dp(config.global_vars,task.dp_mode,task.noise_multiplier,task.clipping_norm, len(node_ids))
-    requires.set_dp_config(driver, node_ids, task.dp_mode,task.noise_multiplier,task.clipping_norm)
+    stages.configure_dp(config.global_vars, task.dp_mode, task.noise_multiplier, task.clipping_norm, len(node_ids))
+    requires.set_dp_config(driver, node_ids, task.dp_mode, task.noise_multiplier, task.clipping_norm)
 
 
 async def execute_training_loop(
-    driver: Driver,
-    node_ids: list[int],
-    parameters: ParametersRecord,
-    n_global_iter: int,
+        driver: Driver,
+        node_ids: list[int],
+        parameters: ParametersRecord,
+        n_global_iter: int,
 ) -> None:
     """Executes the federated training loop with aggregation."""
     for iteration in range(n_global_iter):
@@ -94,6 +98,60 @@ async def execute_training_loop(
         mlflow_client.log_metrics(val_metrics_dict, step=iteration)
 
 
+async def post_training_finalisation(
+        driver: Driver,
+        node_ids: list[int],
+        task: TaskRead,
+        experiment_id: str,
+        parent_run_id: str
+) -> None:
+    """Closes the federated loop by orchestrating synthetic generation and catalogue publication."""
+    if not task.dataset_meta_json:
+        logger.warning("No DCAT-AP schema provided. Skipping Big Pool generation and validation.")
+        return
+
+    logger.info("Initiating Phase 4: Federated Synthetic Data Generation")
+
+    # 1. Instruct a Leader Node to generate the Big Pool
+    leader_node = [node_ids]
+    n_samples = 10000  # Target synthetic payload size
+
+    synthetic_payloads = requires.generate_synthetic_data(driver, leader_node, n_samples)
+    synthetic_csv = synthetic_payloads.get(leader_node)
+
+    if not synthetic_csv:
+        logger.error("CRITICAL: Failed to generate synthetic data from the Leader Node.")
+        return
+
+    # 2. Broadcast CSV to all clients for utility/privacy validation against real hold-outs
+    logger.info("Broadcasting Big Pool for Distributed Validation...")
+    validation_reports = requires.validate_synthetic_data(driver, node_ids, synthetic_csv)
+
+    # Extract utility and privacy dicts safely from the RPC responses
+    utility_reports = {nid: reports.get("utility", "") for nid, reports in validation_reports.items()}
+    privacy_reports = {nid: reports.get("privacy", "") for nid, reports in validation_reports.items()}
+
+    # 3. Hydrate the DCAT-AP schema locally on the Server
+    dataset_meta = DatasetMeta.model_validate_json(task.dataset_meta_json)
+    synthetic_df = pd.read_csv(io.StringIO(synthetic_csv))
+
+    # 4. Log to MLflow using a dedicated Postprocessing sibling run
+    post_run_id = mlflow_client.create_postprocessing_run(experiment_id, parent_run_id)
+    mlflow_client.log_artifact_str(synthetic_csv, "synthetic_data.csv", post_run_id)
+
+    # 5. Publish to Synthema Private PyPI/MinIO Registry
+    logger.info("Pushing validated Big Pool to Private Data Catalogue...")
+    publish_to_catalogue(
+        synthetic_data=synthetic_df,
+        utility_reports=utility_reports,
+        privacy_reports=privacy_reports,
+        dataset_meta=dataset_meta,
+        experiment_id=task.experiment_name
+    )
+
+    mlflow_client.finish_run(post_run_id)
+    logger.info("Phase 4 Finalisation complete. Model is now governed and ready for inference.")
+
 
 async def server_main(task: TaskRead, driver: Driver, context: Context,
                       rabbitmq: AsyncRabbitMQClient) -> None:
@@ -103,7 +161,7 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
                      task_id=task.id,
                      use_case=task.use_case)
         return
-    logger.info("Task started", task_id=task.id) 
+    logger.info("Task started", task_id=task.id)
 
     node_ids = driver.get_node_ids()
     filtered_node_ids = requires.filter_clients(driver, node_ids,
@@ -128,7 +186,8 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
         requires.connect_peers(driver, filtered_node_ids, discovered_peers)
 
     if task.dp_mode:
-        logger.info(f"Configuring DP {task.dp_mode} with clipping norm {task.clipping_norm} and noise multiplier {task.noise_multiplier}")
+        logger.info(
+            f"Configuring DP {task.dp_mode} with clipping norm {task.clipping_norm} and noise multiplier {task.noise_multiplier}")
         await set_dp_config(task, driver, filtered_node_ids)
 
     logger.info("Getting initial parameters")
