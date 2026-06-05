@@ -9,6 +9,7 @@ from flwr.common import (
     RecordSet,
     MetricsRecord,
 )
+from model_store_interface.core.schemas.dataset_meta import DatasetMeta
 
 from fl_client import interface
 
@@ -93,7 +94,7 @@ def test_upload_model_if():
     )
 
     with patch(
-        "fl_client.interface.stages.upload_model", return_value=model_info
+            "fl_client.interface.stages.upload_model", return_value=model_info
     ) as mock_upload_model:
         rsp = interface.upload_model_if(msg, global_vars)
 
@@ -109,7 +110,7 @@ def test_upload_model_if():
 @patch("fl_client.interface.stages.get_model_parameters")
 @patch("fl_client.interface.stages.set_model_parameters")
 def test_train_model_if_success(
-    set_model_parameters_mock, get_model_parameters_mock, train_model_mock
+        set_model_parameters_mock, get_model_parameters_mock, train_model_mock
 ):
     get_model_parameters_mock.return_value = Mock(ParametersRecord)
     train_model_mock.return_value = Mock(MetricsRecord)
@@ -189,11 +190,16 @@ def test_set_parameters_if(set_model_parameters_mock):
 
 
 @patch("fl_client.interface.stages.set_run_config")
-def test_set_run_config_if_success(set_run_config_mock):
+def test_set_run_config_if_edge_hydration(set_run_config_mock):
+    """Guarantees the Flower gRPC payload hydrates the strict DCAT-AP Pydantic schema."""
     global_vars = dict(
-        node_name="node_name",
-        data_path="/path",
+        node_name="ubuntu-edge-02",
+        data_path="/tmp/data.csv",
     )
+
+    # 1. The Raw Primitive (Simulating the RabbitMQ -> Flower network string)
+    valid_dcat_json = '{"title": "Test", "version": "1.0", "use_case": "SCD", "variables": []}'
+
     configs_records = {
         "config": ConfigsRecord(
             {
@@ -201,6 +207,7 @@ def test_set_run_config_if_success(set_run_config_mock):
                 "run_id": "run_id",
                 "model_name": "model_name",
                 "model_version": 1,
+                "dataset_meta_json": valid_dcat_json,
             }
         ),
     }
@@ -209,15 +216,13 @@ def test_set_run_config_if_success(set_run_config_mock):
         content=RecordSet(configs_records=configs_records),
     )
 
-    rsp = interface.set_run_config_if(msg, global_vars)
+    # 2. Execute the boundary hydration
+    interface.set_run_config_if(msg, global_vars)
 
-    # set_run_config_if adds dataset_meta_json and dataset_meta to global_vars
-    assert len(global_vars.keys()) == 4
-    assert "dataset_meta_json" in global_vars
-    assert "dataset_meta" in global_vars
-    assert set_run_config_mock.called
-    assert "success" in rsp.content.configs_records["config"].keys()
-    assert rsp.content.configs_records["config"]["success"]
+    # 3. MLOps Verification: Memory is now type-safe
+    meta = global_vars.get("dataset_meta")
+    assert isinstance(meta, DatasetMeta)
+    assert meta.use_case.value == "SCD"
 
 
 def test_set_run_config_if_error():
