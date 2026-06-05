@@ -163,7 +163,7 @@ def set_run_config_if(msg: Message, global_vars: dict) -> Message:
         # Proceed to orchestrate the standard MLflow tracking parameters
     stages.set_run_config(
         experiment_id=content["experiment_id"],
-        parent_run_id=content["run_id"],
+        parent_run_id=content["parent_run_id"],
         node_name=global_vars["node_name"],
         model_name=content["model_name"],
         model_version=content["model_version"],
