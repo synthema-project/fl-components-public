@@ -7,40 +7,24 @@ authors = [
     { name = "Andoni Beristain Iraola", email = "aberistain@vicomtech.org" },
 ]
 requires-python = ">=3.11,<3.12"
-
 dependencies = [
-    "docker>=7.1.0"
+    "docker>=7.1.0",
 ]
 
 [tool.uv]
 package = false
 
+[tool.uv.workspace]
+members = ["common", "apps/fl_server", "apps/fl_client", "apps/restapi", "apps/status_listener"]
 
-# Poetry
-[tool.poetry]
-name = "fl-global"
-description = "A global venv for running format and lint tools"
-authors = [
-    "Borja Arroyo Galende <borja.arroyog@upm.es>"
-]
-readme = "README.md"
-package-mode = false
-version = "0.0.0"
+[tool.uv.sources]
+model-store-interface = { path = "../app-model_store-interface", editable = true }
 
-[tool.poetry.dependencies]
-python = ">=3.11,<3.12"
-docker = "^7.1.0"
-
-[tool.poetry.group.dev.dependencies]
-ruff = "^0.5"
-
-
-# Test
-
-[[tool.poetry.source]]
-name = "synthema"
-url = "https://pypi.synthema.rid-intrasoft.eu/simple/"
-priority = "supplemental"
+# FIXME: Private Synthema PyPI — use when VPN/registry is reachable instead of path above:
+# [[tool.uv.index]]
+# name = "synthema"
+# url = "https://pypi.synthema.rid-intrasoft.eu/simple/"
+# explicit = true
 
 [tool.pytest.ini_options]
 addopts = [
@@ -49,15 +33,3 @@ addopts = [
 
 [tool.ruff]
 target-version = "py311"
-
-[tool.poetry-dynamic-versioning]
-enable = true
-
-# Build system
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-# FIXME: return to poetry
-# requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
-# build-backend = "poetry_dynamic_versioning.backend"

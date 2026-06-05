@@ -3,22 +3,24 @@ name = "status-listener"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Your Name",email = "you@example.com"}
+    { name = "Borja Arroyo Galende", email = "borja.arroyog@upm.es" },
+    { name = "Andoni Beristain Iraola", email = "aberistain@vicomtech.org" },
 ]
 readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "sqlmodel>=0.0.21,<0.0.22",
+    "aio-pika>=9.5.4,<10",
+    "structlog>=25.1.0,<26",
+    "asyncpg>=0.30.0,<0.31",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11.0"
-sqlmodel = "^0.0.21"
-aio-pika = "^9.5.4"
-structlog = "^25.1.0"
-asyncpg = "^0.30.0"
-
-
-[tool.poetry.group.dev.dependencies]
-pytest-asyncio = "^0.25.3"
-pytest-env = "^1.1.5"
-mypy = "^1.15.0"
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=0.25.3",
+    "pytest-env>=1.1.5,<2",
+    "mypy>=1.15.0,<2",
+]
 
 [tool.mypy]
 python_version = "3.11"
@@ -31,6 +33,21 @@ addopts = [
 [tool.ruff]
 target-version = "py311"
 
+[tool.pytest_env]
+RABBIT_USERNAME = { value = "guest", skip_if_set = true }
+RABBIT_PASSWORD = { value = "guest", skip_if_set = true }
+RABBIT_HOST = { value = "localhost", skip_if_set = true }
+RABBIT_PORT = { value = "5672", skip_if_set = true }
+RABBIT_QUEUE = { value = "task_status", skip_if_set = true }
+POSTGRES_USERNAME = { value = "username", skip_if_set = true }
+POSTGRES_PASSWORD = { value = "password", skip_if_set = true }
+POSTGRES_DB = { value = "postgres", skip_if_set = true }
+POSTGRES_HOST = { value = "localhost", skip_if_set = true }
+POSTGRES_PORT = { value = "5432", skip_if_set = true }
+
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/status_listener"]
