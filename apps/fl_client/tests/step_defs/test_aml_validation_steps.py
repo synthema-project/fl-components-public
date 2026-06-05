@@ -25,8 +25,8 @@ def global_vars():
     """Initialise the isolated state dictionary for the edge node."""
     return {
         "node_name": "ubuntu-edge-01",
-        "data_path": "/tmp/data.csv",
-        DatasetPartition.TEST: pd.DataFrame({"Age": [5, 6], "HB": [9.1, 10.2]})
+        "data_path": "common/data/iris.csv",
+        DatasetPartition.TEST: pd.DataFrame({"Age": [1, 2], "HB": [9.1, 10.2]})
     }
 
 
