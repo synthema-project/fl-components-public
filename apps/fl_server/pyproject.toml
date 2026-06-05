@@ -20,6 +20,7 @@ dependencies = [
     "structlog>=25.1.0,<26",
     "aio-pika>=9.5.4,<10",
     "model-store-interface[edge]>=0.5.0",
+    "minio>=7.2.20",
 ]
 
 [dependency-groups]

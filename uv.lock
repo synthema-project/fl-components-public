@@ -1918,6 +1918,7 @@ source = { editable = "apps/fl_server" }
 dependencies = [
     { name = "aio-pika" },
     { name = "flwr" },
+    { name = "minio" },
     { name = "mlflow-skinny" },
     { name = "model-store-interface", extra = ["edge"] },
     { name = "numpy" },
@@ -1944,6 +1945,7 @@ dev = [
 requires-dist = [
     { name = "aio-pika", specifier = ">=9.5.4,<10" },
     { name = "flwr", specifier = "==1.9" },
+    { name = "minio", specifier = ">=7.2.20" },
     { name = "mlflow-skinny", specifier = "==2.19" },
     { name = "model-store-interface", extras = ["edge"], editable = "../app-model_store-interface" },
     { name = "numpy", specifier = ">=1,<2" },
