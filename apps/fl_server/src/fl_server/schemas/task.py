@@ -1,42 +1,19 @@
-import enum
-from datetime import datetime
+"""
+Passthrough schema module to eradicate Schema Drift (DRY violation).
+Mathematically delegates all Pydantic and SQLModel definitions to the
+immutable DevSecOps SDK in the common repository.
+"""
 
-from sqlmodel import SQLModel, Field, Column, Enum
-from pydantic import BaseModel
+# Strict import from the common library (Single Source of Truth)
+# This guarantees the FL Server loads the exact same fields (dataset_meta_json)
+# as the REST API and the RabbitMQ transit layer.
+from schemas.task import (
+    Status,
+    TaskStatus,
+    TaskBase,
+    TaskRead,
+    TaskCreate,
+)
 
-
-class Status(str, enum.Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCESS = "success"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class TaskStatus(BaseModel):
-    id: int
-    status: Status
-
-
-class TaskBase(SQLModel):
-    user_id: str = Field(nullable=False)
-    # dataset_uris: List[str] = Field(default=None, sa_column=Column(ARRAY(String())))
-    use_case: str = Field(nullable=False)
-    model_name: str = Field(nullable=False)
-    model_version: int = Field(nullable=False)
-    num_global_iterations: int = Field(nullable=False)
-    run_name: str = Field(nullable=False)
-    experiment_name: str = Field(nullable=False)
-
-
-class TaskRead(TaskBase, table=True):
-    id: int = Field(default=None, primary_key=True, nullable=False)
-    status: Status = Field(default=Status.PENDING, sa_column=Column(Enum(Status)))
-    created_at: datetime = Field(default_factory=datetime.now, nullable=False)
-
-    def change_status(self, new_status: str) -> None:
-        self.status = Status[new_status.upper()]
-
-
-class TaskCreate(TaskBase):
-    pass
+# Explicitly re-export the definitions so downstream fl_server imports do not break
+__all__ = ["Status", "TaskStatus", "TaskBase", "TaskRead", "TaskCreate"]

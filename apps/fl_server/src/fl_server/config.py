@@ -10,6 +10,7 @@ RABBIT_PORT: str = os.getenv("RABBIT_PORT", "5672")
 DATA_CATALOGUE_URL: str = os.getenv("DATA_CATALOGUE_URL", "http://data-catalogue:8000")
 
 P2P_PORT: int = int(os.getenv("P2P_PORT", "50051"))
+DATA_CATALOGUE_URL: str = os.getenv("DATA_CATALOGUE_URL", "http://localhost:8000")
 
 global global_vars
 global_vars = {

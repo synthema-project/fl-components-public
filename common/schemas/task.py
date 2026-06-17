@@ -31,6 +31,11 @@ class TaskBase(SQLModel):
     dp_mode: Optional[str] = Field(default=None)
     noise_multiplier: Optional[int] = Field(default=None)
     clipping_norm: Optional[int] = Field(default=None)
+    dataset_meta_json: Optional[str] = Field(default=None, description="Serialised DCAT-AP metadata schema")
+    n_samples_synthetic: Optional[int] = Field(
+        default=10000,
+        description="The number of synthetic patient records to generate post-training"
+    )
 
 class TaskRead(TaskBase, table=True):
     id: int = Field(default=None, primary_key=True, nullable=False)

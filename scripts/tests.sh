@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Check if Poetry is installed
-if ! command -v poetry &> /dev/null; then
-    echo "Error: Poetry is not installed. Please install Poetry first."
+# Check if uv is installed
+if ! command -v uv &> /dev/null; then
+    echo "Error: uv is not installed. Please install uv first."
     exit 1
 fi
 
@@ -11,17 +11,18 @@ projects=(
     "apps/fl_client"
     "apps/fl_server"
     "apps/restapi"
+    "apps/status_listener"
     "common"
 )
 
-# Function to run Poetry commands and handle errors
-run_poetry_command() {
+# Function to run uv commands and handle errors
+run_uv_command() {
     local command=$1
     local message=$2
     local project=$3
 
     echo "Running ${message} for ${project:-"root project"}..."
-    poetry run $command > /dev/null
+    uv run $command > /dev/null
     if [ $? -ne 0 ]; then
         echo "Error: ${message} failed ${project:+for $project}."
         exit 1
@@ -32,16 +33,16 @@ run_poetry_command() {
 # Function to run tests and quality tools
 run_tests() {
     # Run global checks
-    run_poetry_command "ruff check --fix" "ruff check"
-    run_poetry_command "ruff format" "ruff format"
+    run_uv_command "ruff check --fix" "ruff check"
+    run_uv_command "ruff format" "ruff format"
     echo "==================================================================="
 
     # Run tests and checks for each project
     for project in "${projects[@]}"; do
         echo "Running tests and checks for $project..."
         cd "$project" || exit
-        run_poetry_command "pytest" "pytest" "$project"
-        run_poetry_command "python -m mypy . --explicit-package-bases" "mypy" "$project"
+        run_uv_command "pytest" "pytest" "$project"
+        run_uv_command "python -m mypy . --explicit-package-bases" "mypy" "$project"
         cd - > /dev/null || exit
         echo "==================================================================="
     done

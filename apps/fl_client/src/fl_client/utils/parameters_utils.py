@@ -4,7 +4,6 @@ import torch
 import logging
 from flwr.common import Parameters, ndarrays_to_parameters, ParametersRecord, Array
 from collections import OrderedDict
-import grpc
 
 logger = logging.getLogger(__name__)
 EMPTY_TENSOR_KEY = "_empty"

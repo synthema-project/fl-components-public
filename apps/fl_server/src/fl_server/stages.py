@@ -34,7 +34,7 @@ def aggregate_parameters(
     aggregator = global_vars["aggregator"]
     agg_parameters = aggregator.aggregate_parameters(parameter_list)
 
-    if  global_vars["dp_config"]:
+    if global_vars.get("dp_config"):
         dp_mode = global_vars["dp_config"]["dp_mode"]
         noise_multiplier = global_vars["dp_config"]["noise_multiplier"]
         clipping_norm = global_vars["dp_config"]["clipping_norm"]

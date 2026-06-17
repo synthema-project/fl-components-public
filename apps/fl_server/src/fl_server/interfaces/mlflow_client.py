@@ -1,15 +1,18 @@
 from typing import Any, Optional, Self, cast
 
 import mlflow
+import structlog
 from mlflow import MlflowClient
+from mlflow.data.http_dataset_source import HTTPDatasetSource
+from mlflow.data.meta_dataset import MetaDataset
 from mlflow.models.model import ModelInfo
 from mlflow.pyfunc import PyFuncModel, load_model as _load_model
 from mlflow.pytorch import log_model as _log_model
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
-from mlflow.data.meta_dataset import MetaDataset
-from mlflow.data.http_dataset_source import HTTPDatasetSource
 
 from .utils import ensure_bool, MutableBoolean
+
+logger = structlog.get_logger(__name__)
 
 mlflow.set_system_metrics_sampling_interval(0.5)
 
@@ -86,20 +89,22 @@ def setup_mlflow(tracking_url: str, is_central_node: bool = False) -> None:
 def create_parent_run(run_name: str, experiment_name: str) -> tuple[str, str]:
     """
     Creates a parent run in the MLflow experiment.
-
-    Args:
-        run_name (str): Name of the parent run.
-        experiment_name (str): Name of the experiment to create the run in.
-
-    Returns:
-        tuple[str, str]: A tuple containing the run ID and experiment ID of the parent run.
+    Mathematically ensures idempotency by verifying experiment existence prior to creation,
+    preventing crash-loops on uninitialised Ubuntu edge nodes.
     """
-    experiment = _mlflow_client.get_experiment_by_name(experiment_name)
+    experiment = mlflow.get_experiment_by_name(experiment_name)
     if not experiment:
-        raise ValueError(f"Experiment {experiment_name} not found")
-    experiment_id = experiment.experiment_id
-    run = _mlflow_client.create_run(experiment_id=experiment_id, run_name=run_name)
-    return run.info.run_id, run.info.experiment_id
+        logger.info(f"Experiment '{experiment_name}' not found. Auto-creating MLOps namespace...")
+        experiment_id = mlflow.create_experiment(experiment_name)
+    else:
+        experiment_id = experiment.experiment_id
+
+    run = mlflow.start_run(
+        experiment_id=experiment_id,
+        run_name=run_name,
+        tags={"mlflow.note.content": "Federated Generative Training Run"}
+    )
+    return run.info.run_id, experiment_id
 
 
 @ensure_bool(_initialized)
@@ -131,11 +136,11 @@ def create_child_run(experiment_id: str, parent_run_id: str, node_name: str) -> 
 @ensure_bool(_configured, False)
 @ensure_bool(_initialized)
 def set_current_config(
-    experiment_id: str,
-    parent_run_id: str | None,
-    child_run_id: str,
-    model_name: str,
-    model_version: int,
+        experiment_id: str,
+        parent_run_id: str | None,
+        child_run_id: str,
+        model_name: str,
+        model_version: int,
 ) -> None:
     """
     Sets the current configuration with experiment and model metadata.
@@ -195,7 +200,7 @@ def load_model() -> PyFuncModel:
 @ensure_bool(_configured)
 @ensure_bool(_initialized)
 def upload_final_state(
-    local_learner: Any,
+        local_learner: Any,
 ) -> dict[str, Any]:
     """
     Uploads the final model state to MLflow and sets the appropriate tags and metadata.
@@ -210,7 +215,7 @@ def upload_final_state(
     if mlflow.active_run():
         mlflow.end_run()
     with mlflow.start_run(
-        run_id=_current_config.parent_run_id,
+            run_id=_current_config.parent_run_id,
     ):
         model_info: ModelInfo = _log_model(
             pytorch_model=local_learner,
@@ -243,8 +248,8 @@ def upload_final_state(
 @ensure_bool(_configured)
 @ensure_bool(_initialized)
 def log_metrics(
-    metrics: dict,
-    step: int,
+        metrics: dict,
+        step: int,
 ) -> None:
     """
     Logs metrics to MLflow for the current child run.
@@ -256,7 +261,6 @@ def log_metrics(
     mlflow.log_metrics(metrics, step=step)
 
 
-@ensure_bool(_configured)
 @ensure_bool(_initialized)
 def set_dataset_signature(node_name: str, path: str, run_id: str) -> None:
     """
@@ -270,3 +274,65 @@ def set_dataset_signature(node_name: str, path: str, run_id: str) -> None:
     source = HTTPDatasetSource(f"{node_name}://{path}")
     dataset = MetaDataset(source)  # type: ignore
     mlflow.log_input(dataset, "training")
+
+
+@ensure_bool(_initialized)
+def create_postprocessing_run(experiment_id: str, parent_run_id: str) -> str:
+    """Create a sibling MLflow run tagged as 'postprocessing'.
+
+    Args:
+        experiment_id (str): The experiment that owns the parent training run.
+        parent_run_id (str): The ID of the parent federated training run.
+
+    Returns:
+        str: The run ID of the newly created postprocessing run.
+    """
+    run = _mlflow_client.create_run(
+        experiment_id=experiment_id,
+        run_name="postprocessing",
+        tags={
+            MLFLOW_PARENT_RUN_ID: parent_run_id,
+            "type": "postprocessing",
+        },
+    )
+    return str(run.info.run_id)
+
+
+@ensure_bool(_initialized)
+def log_artifact_str(content: str, artifact_path: str, run_id: str) -> None:
+    """Log a string payload as an MLflow artifact on a specific run.
+
+    Writes *content* to a temporary file and uploads it under *artifact_path*
+    inside the given *run_id*'s artifact store.  The temporary file is always
+    removed afterwards.
+
+    Args:
+        content (str): Text content to upload.
+        artifact_path (str): Destination path within the run's artifact store
+            (e.g. ``"postprocessing/reports/node1_utility.html"``).
+        run_id (str): Target MLflow run ID.
+    """
+    import tempfile
+    import os
+
+    # Split artifact_path into directory and filename
+    artifact_dir = "/".join(artifact_path.split("/")[:-1]) if "/" in artifact_path else None
+    filename = artifact_path.split("/")[-1]
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=f"_{filename}", delete=False, encoding="utf-8") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        _mlflow_client.log_artifact(run_id, tmp_path, artifact_path=artifact_dir)
+    finally:
+        os.unlink(tmp_path)
+
+
+def finish_run(run_id: str) -> None:
+    """Mark an MLflow run as FINISHED.
+
+    Args:
+        run_id (str): The run ID to finish.
+    """
+    _mlflow_client.update_run(run_id, "FINISHED")

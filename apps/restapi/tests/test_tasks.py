@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock
-from httpx import AsyncClient  # Use AsyncClient for async FastAPI testing
+from httpx import AsyncClient, ASGITransport  # Use AsyncClient for async FastAPI testing
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, delete
@@ -58,7 +58,7 @@ async def clear_table(async_session: AsyncSession):
 @pytest_asyncio.fixture
 async def async_client():
     """Provides an async test client for FastAPI."""
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
 
 

@@ -1,33 +1,34 @@
 #!/bin/bash
 
-# Lista de directorios de aplicaciones y librerías
+# List of projects to clean
 projects=(
     "."
     "apps/fl_client"
     "apps/fl_server"
     "apps/restapi"
+    "apps/status_listener"
     "common"
 )
 
-# Función para limpiar entornos virtuales y archivos temporales
+# Function to clean environments and temporary files
 clean() {
     for project in "${projects[@]}"; do
         echo "Cleaning environment for $project..."
         cd "$project" || exit
-        # Eliminar el entorno virtual
-        poetry env remove --all
-        # Eliminar archivos __pycache__
+        # Remove local virtual environment if it exists
+        rm -rf .venv
+        # Remove __pycache__ directories
         find . -name '__pycache__' -exec rm -rf {} +
-        # Eliminar archivos .pyc
+        # Remove .pyc files
         find . -name '*.pyc' -exec rm -f {} +
         cd - > /dev/null || exit
     done
 }
 
-# Obtener el directorio donde se encuentra el script actual
+# Get the directory where the current script is located
 script_dir="$(dirname "$(realpath "$0")")"
 
-# Cambiar al directorio padre
+# Change to the parent directory
 cd "$(dirname "$script_dir")" || exit
 
 clean

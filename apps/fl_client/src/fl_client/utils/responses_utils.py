@@ -132,3 +132,20 @@ def create_generate_synthetic_response(msg: Message, result: dict) -> Message:
     )
     rs = RecordSet(configs_records={"config": configsrecord})
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+
+def create_evaluate_response(
+    msg: Message, model_metrics: MetricsRecord
+) -> Message:
+    configsrecord = ConfigsRecord(
+        {
+            "success": True,
+            "message": "model evaluated successfully",
+        }
+    )
+    rs = RecordSet(
+        metrics_records={"metrics": model_metrics},
+        configs_records={"config": configsrecord},
+    )
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+

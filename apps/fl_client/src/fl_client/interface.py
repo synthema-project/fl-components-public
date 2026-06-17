@@ -3,22 +3,30 @@ from collections import OrderedDict
 from flwr.common import Message, parameters_to_ndarrays, Parameters
 import structlog
 from fl_models.iris.utils import Utils
+from flwr.common import Message
 from flwr.common.differential_privacy import (
     compute_clip_model_update,
 )
 from interfaces import recordset
+from model_store_interface.core.schemas.dataset_meta import DatasetMeta, UseCase
+
 from fl_client import stages
-from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
+from fl_client.utils import responses_utils
+from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, \
+    split_model_parameters_to_shares, numpy_dict_to_torch_state_dict
 from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, split_model_parameters_to_shares, numpy_dict_to_torch_state_dict
 from fl_client.utils.responses_utils import create_error_response, create_generate_synthetic_response
 
+
 logger = structlog.get_logger()
+
 
 def set_dp_config_if(msg: Message, global_vars: dict) -> Message:
     dp_params = recordset.read_set_dp_cfg_recordset(msg.content)
-    stages.set_dp_config(dp_params,global_vars)
+    stages.set_dp_config(dp_params, global_vars)
     return responses_utils.create_success_response(msg, "set dp config successfully")
+
 
 def load_data_if(msg: Message, global_vars: dict) -> Message:
     use_case, dataset_paths = recordset.read_load_data_recordset(msg.content)
@@ -34,9 +42,11 @@ def prepare_data_if(msg: Message, global_vars: dict) -> Message:
     stages.prepare_data(global_vars)
     return responses_utils.create_success_response(msg, "prepared data successfully")
 
+
 def load_model_if(msg: Message, global_vars: dict) -> Message:
     stages.load_model(global_vars)
     return responses_utils.create_success_response(msg, "loaded model successfully")
+
 
 def upload_model_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters = recordset.read_upload_model_recordset(msg.content)
@@ -45,10 +55,12 @@ def upload_model_if(msg: Message, global_vars: dict) -> Message:
         msg, model_info["model_id"], model_info["run_id"]
     )
 
+
 def set_smpc_enabled_if(msg: Message, global_vars: dict) -> Message:
     smpc_enabled = recordset.read_set_smpc_enabled_recordset(msg.content)
     stages.set_SMPC_enabled(smpc_enabled, global_vars)
     return responses_utils.create_success_response(msg, "set smpc enabled successfully")
+
 
 def train_model_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters, current_global_iter = recordset.read_train_model_recordset(
@@ -58,6 +70,7 @@ def train_model_if(msg: Message, global_vars: dict) -> Message:
     metrics = stages.train_model(global_vars, current_global_iter)
     latest_parameters = stages.get_model_parameters(global_vars)
     return responses_utils.create_train_response(msg, latest_parameters, metrics)
+
 
 def train_model_fixed_clipping_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters, current_global_iter = recordset.read_train_model_recordset(
@@ -85,11 +98,12 @@ def train_model_fixed_clipping_if(msg: Message, global_vars: dict) -> Message:
     clipped_params = OrderedDict()
     keys = client_to_server_params_dict.keys()
 
-    for key, value in zip(keys,client_to_server_params):
+    for key, value in zip(keys, client_to_server_params):
         clipped_params[key] = value
 
-    clipped_parameters=Utils.dict_to_parameter_record(clipped_params)
+    clipped_parameters = Utils.dict_to_parameter_record(clipped_params)
     return responses_utils.create_train_response(msg, clipped_parameters, metrics)
+
 
 def train_model_SMPC_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters, current_global_iter = recordset.read_train_model_recordset(
@@ -104,7 +118,8 @@ def train_model_SMPC_if(msg: Message, global_vars: dict) -> Message:
 
     all_node_names = list(global_vars["discovered_peers_ids"])
     all_node_names.append(global_vars["node_name"])
-    local_shares, remote_shares = split_model_parameters_to_shares(deserialized_params, all_node_names, global_vars["node_name"])
+    local_shares, remote_shares = split_model_parameters_to_shares(deserialized_params, all_node_names,
+                                                                   global_vars["node_name"])
 
     logger.info(deserialized_params)
     print("-- Sending shares to peers --")
@@ -115,36 +130,66 @@ def train_model_SMPC_if(msg: Message, global_vars: dict) -> Message:
     parameter_record = Utils.pytorch_to_parameter_record(latest_parameters)
     return responses_utils.create_train_response(msg, parameter_record, metrics)
 
+
 def get_parameters_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters = stages.get_model_parameters(global_vars)
     return responses_utils.create_parameters_response(msg, latest_parameters)
+
 
 def set_parameters_if(msg: Message, global_vars: dict) -> Message:
     latest_parameters = recordset.read_set_parameters_recordset(msg.content)
     stages.set_model_parameters(latest_parameters, global_vars)
     return responses_utils.create_success_response(msg, "set parameters successfully")
 
+
 def set_run_config_if(msg: Message, global_vars: dict) -> Message:
     content = recordset.read_set_run_cfg_recordset(msg.content)
+    dataset_meta_json = content.get("dataset_meta_json")
+
+    if dataset_meta_json:
+        try:
+            # Deserialise the string into the type-safe Python >=3.11 object
+            dataset_meta = DatasetMeta.model_validate_json(dataset_meta_json)
+            if isinstance(dataset_meta.use_case, str):
+                dataset_meta = dataset_meta.model_copy(
+                    update={"use_case": UseCase(dataset_meta.use_case)}
+                )
+            global_vars["dataset_meta"] = dataset_meta
+
+            # Safely log the enum value to guarantee type alignment
+            logger.info(
+                f"Successfully hydrated DCAT-AP schema for Use Case: {dataset_meta.use_case.value}"
+            )
+        except Exception as e:
+            logger.error(f"Catastrophic failure hydrating Pydantic DatasetMeta: {e}")
+            global_vars["dataset_meta"] = None
+    else:
+        logger.warning("No dataset_meta_json payload received from FL Server.")
+        global_vars["dataset_meta"] = None
+
+        # Proceed to orchestrate the standard MLflow tracking parameters
     stages.set_run_config(
-        content["experiment_id"],
-        content["parent_run_id"],
-        global_vars["node_name"],
-        content["model_name"],
-        content["model_version"],
-        global_vars["data_path"],
+        experiment_id=content["experiment_id"],
+        parent_run_id=content["parent_run_id"],
+        node_name=global_vars["node_name"],
+        model_name=content["model_name"],
+        model_version=content["model_version"],
+        data_path=global_vars["data_path"],
     )
     return responses_utils.create_success_response(msg, "set run config successfully")
+
 
 def clean_config_if(msg: Message) -> Message:
     stages.clean_current_config()
     return responses_utils.create_success_response(msg, "cleaned config successfully")
+
 
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
     use_case = recordset.read_filter_clients_recordset(msg.content)
     if use_case == global_vars["use_case"]:
         return responses_utils.create_participate_response(msg, True)
     return responses_utils.create_participate_response(msg, False)
+
 
 def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     config = recordset.read_discover_peers_recordset(msg.content)
@@ -154,7 +199,7 @@ def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
         client_id=global_vars["node_name"],
         grpc_port=config['client_port'],
         min_peers=config['min_peers'],
-        max_discovery_time=config['max_discovery_time'],)
+        max_discovery_time=config['max_discovery_time'], )
 
     # Start discovery in a separate thread
     discovery_thread = threading.Thread(
@@ -167,6 +212,7 @@ def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     stages.set_discovered_peers(discovered_peers, discovered_peers_ids, global_vars)
     return responses_utils.create_discovery_response(msg, discovered_peers)
 
+
 def connect_peers_if(msg: Message, global_vars: dict) -> Message:
     discovered_peers = global_vars["discovered_peers"]
     logger.info("-- CLEINT DISCOVERED PEERS --")
@@ -176,6 +222,7 @@ def connect_peers_if(msg: Message, global_vars: dict) -> Message:
     global_vars["peer_stubs"] = stages.connect_peers(discovered_peers, global_vars)
     return responses_utils.create_connect_peers_response(msg, discovered_peers)
 
+
 def start_P2P_server_if(msg: Message, global_vars: dict) -> Message:
     config = recordset.read_start_P2P_server_recordset(msg.content)
     stages.start_P2P_server(
@@ -184,23 +231,69 @@ def start_P2P_server_if(msg: Message, global_vars: dict) -> Message:
 
     return responses_utils.create_start_p2p_server_response(msg, config['port'])
 
-def generate_synthetic_if(msg: Message, global_vars: dict) -> Message:
-    try:
-        params = recordset.read_generate_synthetic_recordset(msg.content)
-    except Exception as e:
-        return create_error_response(msg, f"Invalid generate_synthetic recordset: {e}")
 
-    try:
-        result = stages.generate_synthetic_and_upload(
-            global_vars,
-            params["n_samples"],
-            params["sdg_model_name"],
-            params.get("dataset_meta_json", ""),
-            params.get("upload_to_s3", True),
-            params.get("s3_bucket", "synthetic-data"),
-            params.get("create_s3_bucket_if_missing", False),
-            params.get("real_data_partition", "test"),
-        )
-        return create_generate_synthetic_response(msg, result)
-    except Exception as e:
-        return create_error_response(msg, f"Synthetic generation failed: {e}")
+def evaluate_model_if(msg: Message, global_vars: dict) -> Message:
+    latest_parameters = recordset.read_evaluate_recordset(msg.content)
+    stages.set_model_parameters(latest_parameters, global_vars)
+    metrics = stages.evaluate_model(global_vars)
+    return responses_utils.create_evaluate_response(msg, metrics)
+
+
+def generate_synthetic_data_if(msg: Message, global_vars: dict) -> Message:
+    """Handle a QUERY message requesting synthetic data generation.
+
+    Reads ``n_samples`` from the incoming recordset, delegates to
+    ``stages.generate_synthetic_data``, and returns the CSV payload
+    in a ``ConfigsRecord`` under the key ``synthetic_csv``.
+    """
+    from flwr.common import ConfigsRecord, RecordSet, DEFAULT_TTL
+
+    n_samples = recordset.read_generate_synthetic_data_recordset(msg.content)
+    csv_str = stages.generate_synthetic_data(n_samples, global_vars)
+
+    configs = ConfigsRecord({"success": True, "synthetic_csv": csv_str})
+    rs = RecordSet(configs_records={"config": configs})
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+
+def validate_synthetic_data_if(msg: Message, global_vars: dict) -> Message:
+    """Handle a QUERY message requesting synthetic data validation.
+
+    Reads ``synthetic_csv`` from the incoming recordset, delegates to
+    ``stages.validate_synthetic_data``, and returns ``utility_report``
+    and ``privacy_report`` HTML strings in the reply ``ConfigsRecord``.
+    """
+    from flwr.common import ConfigsRecord, RecordSet, DEFAULT_TTL
+
+    csv_str = recordset.read_validate_synthetic_data_recordset(msg.content)
+    reports = stages.validate_synthetic_data(csv_str, global_vars)
+
+    configs = ConfigsRecord({
+        "success": True,
+        "utility": reports["utility"],
+        "privacy": reports["privacy"],
+    })
+    rs = RecordSet(configs_records={"config": configs})
+    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+
+#def generate_synthetic_if(msg: Message, global_vars: dict) -> Message:
+#    try:
+#        params = recordset.read_generate_synthetic_recordset(msg.content)
+#    except Exception as e:
+#        return create_error_response(msg, f"Invalid generate_synthetic recordset: {e}")
+
+#    try:
+#        result = stages.generate_synthetic_and_upload(
+#            global_vars,
+#            params["n_samples"],
+#            params["sdg_model_name"],
+#            params.get("dataset_meta_json", ""),
+#            params.get("upload_to_s3", True),
+#            params.get("s3_bucket", "synthetic-data"),
+#            params.get("create_s3_bucket_if_missing", False),
+#            params.get("real_data_partition", "test"),
+#        )
+#        return create_generate_synthetic_response(msg, result)
+#    except Exception as e:
+#        return create_error_response(msg, f"Synthetic generation failed: {e}")
