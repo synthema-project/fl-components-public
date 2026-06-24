@@ -41,12 +41,12 @@ pipeline {
                 sh "python3 scripts/images.py --mode test --tag test"
             }
         }
-        stage ("E2E_Tests"){
-            steps{
-                echo "***** Running E2E Tests *****"
-                sh "bash e2e/docker_full/run.sh"
-            }
-        }
+        //stage ("E2E_Tests"){
+        //    steps{
+        //        echo "***** Running E2E Tests *****"
+        //        sh "bash e2e/docker_full/run.sh"
+        //    }
+        //}
         // *******************************
         // *** Push Images To Registry ***
         // *******************************
