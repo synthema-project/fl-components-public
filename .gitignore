@@ -21,6 +21,11 @@ sdist/
 var/
 wheels/
 share/python-wheels/
+# Vendored model-store-interface wheel (Option A): `wheels/` above ignores all wheel dirs,
+# so re-include the two app contexts whose Docker build installs the wheel. CI has no
+# app-model_store-interface sibling checkout, so the wheel must travel with the repo.
+!apps/fl_server/wheels/
+!apps/fl_client/wheels/
 *.egg-info/
 .installed.cfg
 *.egg

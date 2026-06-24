@@ -44,6 +44,7 @@ Examples:
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -112,6 +113,12 @@ def get_context_path(root_dir, image_path):
 # ------------------------------------------------------------------------------
 # model-store-interface wheel vendoring
 # ------------------------------------------------------------------------------
+def _wheel_version(path):
+    """Sort key: parse the version tuple out of a model_store_interface-X.Y.Z wheel name."""
+    m = re.search(r"model_store_interface-([0-9]+(?:\.[0-9]+)*)", path.name)
+    return tuple(int(x) for x in m.group(1).split(".")) if m else (0,)
+
+
 def prepare_msi_wheel(root_dir, context_path):
     """Build the model-store-interface wheel and vendor it into the build context.
 
@@ -120,8 +127,20 @@ def prepare_msi_wheel(root_dir, context_path):
     Dockerfile installs it via ``UV_FIND_LINKS`` during ``uv sync``.
     """
     interface_dir = (root_dir.parent / MSI_DIRNAME).resolve()
+    wheels_dir = context_path / "wheels"
+    existing = list(wheels_dir.glob("model_store_interface-*.whl")) if wheels_dir.exists() else []
+
     if not interface_dir.exists():
-        print(f"[ERROR] model-store-interface repo not found at {interface_dir}")
+        # CI / checkout without the sibling repo: fall back to a wheel already vendored
+        # in the build context (e.g. committed under apps/<app>/wheels/).
+        if existing:
+            print(f"[INFO] {MSI_DIRNAME} not found at {interface_dir}; "
+                  f"using pre-vendored wheel(s) in {wheels_dir}")
+            return True
+        print(f"[ERROR] {MSI_DIRNAME} repo not found at {interface_dir} and no pre-vendored "
+              f"wheel in {wheels_dir}.")
+        print("[ERROR] Provide the wheel in the build context's wheels/ dir, configure a "
+              "package index, or check out the repo as a sibling of the fl-components root.")
         return False
 
     print("[INFO] Building model-store-interface wheel...")
@@ -129,18 +148,20 @@ def prepare_msi_wheel(root_dir, context_path):
         print("[ERROR] Failed to build model-store-interface wheel")
         return False
 
-    wheels_dir = context_path / "wheels"
+    built = sorted(
+        (interface_dir / "dist").glob("model_store_interface-*.whl"),
+        key=_wheel_version,
+    )
+    if not built:
+        print("[ERROR] No model-store-interface wheel found after build")
+        return False
+
+    latest = built[-1]
     wheels_dir.mkdir(exist_ok=True)
     for stale in wheels_dir.glob("model_store_interface-*.whl"):
         stale.unlink()
-    copied = 0
-    for whl in (interface_dir / "dist").glob("model_store_interface-*.whl"):
-        shutil.copy2(whl, wheels_dir / whl.name)
-        copied += 1
-    if copied == 0:
-        print("[ERROR] No model-store-interface wheel found after build")
-        return False
-    print(f"[OK] Vendored {copied} model-store-interface wheel(s) into {wheels_dir}")
+    shutil.copy2(latest, wheels_dir / latest.name)
+    print(f"[OK] Vendored {latest.name} into {wheels_dir}")
     return True
 
 
@@ -278,21 +299,28 @@ def test_images(client: docker.DockerClient, config, tag):
 # Handlers for Each Mode
 # ------------------------------------------------------------------------------
 def handle_build(client, config, tag, root_dir):
-    """Build all images in the configuration."""
+    """Build all images in the configuration. Returns True only if every image built."""
     if not tag:
         print("[ERROR] --tag is required for building images.")
-        return
+        return False
     base_image_def = config["images"][0]
     dependent_images = config["images"][1:]
 
     print("[INFO] Building base image...")
     if not build_image(client, base_image_def, tag, root_dir):
         print("[ERROR] Base image build failed. Aborting.")
-        return
+        return False
 
     print("[INFO] Building dependent images...")
+    failed = []
     for img in dependent_images:
-        build_image(client, img, tag, root_dir, base_image=base_image_def["name"])
+        if not build_image(client, img, tag, root_dir, base_image=base_image_def["name"]):
+            failed.append(img["name"])
+
+    if failed:
+        print(f"[ERROR] Image build failed for: {', '.join(failed)}")
+        return False
+    return True
 
 
 def handle_remove(client, config):
@@ -319,7 +347,8 @@ def main():
     client = docker.from_env()
 
     if args.mode == "build":
-        handle_build(client, config, args.tag, root_dir)
+        if not handle_build(client, config, args.tag, root_dir):
+            exit(1)
     elif args.mode == "remove":
         handle_remove(client, config)
     elif args.mode == "tag":
