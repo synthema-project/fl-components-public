@@ -17,7 +17,7 @@ import os
 from interfaces import mlflow_client
 from model_store_interface import validation
 from model_store_interface.core.dataset_partition import DatasetPartition
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+from model_store_interface import DatasetMeta
 
 from fl_client import smpc_pb2
 from fl_client.SMPCClient import SMPCClient
@@ -89,11 +89,11 @@ def load_data(
     global_vars["data"] = data
 
 
-#def load_data(
+# def load_data(
 #        use_case: str,
 #        dataset_paths: list[str],
 #        global_vars: dict,
-#):
+# ):
 #    if not dataset_paths:
 #        raise ValueError(
 #            f"No dataset paths received for node {global_vars['node_name']}"
@@ -102,11 +102,11 @@ def load_data(
 #    dataframes = []
 
 #    for object_path in dataset_paths:
-        # Support partitioned dataset paths of the form "partition:path",
-        # e.g. "train:s3://bucket/train.csv". If no partition prefix is
-        # provided we keep old behavior and concatenate everything.
+# Support partitioned dataset paths of the form "partition:path",
+# e.g. "train:s3://bucket/train.csv". If no partition prefix is
+# provided we keep old behavior and concatenate everything.
 #        if ":" in object_path and not object_path.startswith("s3://"):
-            # interpret as partition:path
+# interpret as partition:path
 #            partition, path = object_path.split(":", 1)
 #            local_file = download_object(path)
 #            df = pd.read_csv(local_file)
@@ -119,8 +119,8 @@ def load_data(
 #            df = pd.read_csv(local_file)
 #            dataframes.append(df)
 
-    # If we collected unlabeled dataframes, concatenate them as the default
-    # dataset. Also keep per-partition mapping available in global_vars.
+# If we collected unlabeled dataframes, concatenate them as the default
+# dataset. Also keep per-partition mapping available in global_vars.
 #    if dataframes:
 #        dataset = pd.concat(dataframes, ignore_index=True)
 #        global_vars["dataset"] = dataset
@@ -446,7 +446,7 @@ def generate_synthetic_and_upload(global_vars: dict,
         if dataset_meta_json:
             # Try to import DatasetMeta from model_store_interface
             try:
-                from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+                from model_store_interface import DatasetMeta
                 dataset_meta_obj = DatasetMeta.model_validate_json(dataset_meta_json)
             except Exception:
                 # Fallback to plain dict

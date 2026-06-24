@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from flwr.common import Message, Metadata, RecordSet, ConfigsRecord
 from model_store_interface.core.dataset_partition import DatasetPartition
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta, UseCase, Variable
+from model_store_interface import DatasetMeta, UseCase, Variable
 from pytest_bdd import scenario, given, when, then
 
 from fl_client import interface

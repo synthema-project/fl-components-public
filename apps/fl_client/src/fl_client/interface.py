@@ -8,7 +8,7 @@ from flwr.common.differential_privacy import (
     compute_clip_model_update,
 )
 from interfaces import recordset
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta, UseCase
+from model_store_interface import DatasetMeta, UseCase
 
 from fl_client import stages
 from fl_client.utils import peer_discovery

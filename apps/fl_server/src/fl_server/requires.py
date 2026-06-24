@@ -10,8 +10,6 @@ from flwr.server import Driver
 from fl_server import stages, config
 from fl_server.utils import driver_utils, requires_utils
 from fl_server.data_catalogue import DataCatalogueClient
-from fl_server.config import DATA_CATALOGUE_URL
-from interfaces.recordset import create_load_data_recordset
 
 import interfaces.recordset
 logger = structlog.get_logger()
@@ -385,7 +383,7 @@ def validate_synthetic_data(
         synthetic_csv: CSV string of synthetic data generated on the elected node.
 
     Returns:
-        Mapping of ``node_id -> {"utility_report": str, "privacy_report": str}``.
+        Mapping of ``node_id -> {"utility": str, "privacy": str}`` (HTML reports).
     """
     all_replies = execution_flow(
         driver=driver,
@@ -398,176 +396,9 @@ def validate_synthetic_data(
     )
     return {
         msg.metadata.dst_node_id: {
-            "utility_report": msg.content.configs_records["config"]["utility_report"],
-            "privacy_report": msg.content.configs_records["config"]["privacy_report"],
+            "utility": msg.content.configs_records["config"]["utility"],
+            "privacy": msg.content.configs_records["config"]["privacy"],
         }
         for msg in all_replies
     }
 
-## TODO check
-#def generate_synthetic_data(
-#    driver: Driver,
-#    node_ids: list[int],
-#    use_case: str,
-#    n_samples: int,
-#    sdg_model_name: str,
-#    dataset_meta_json: str = "",
-#    upload_to_s3: bool = True,
-#    s3_bucket: str = "synthetic-data-for-inference",
-#    create_s3_bucket_if_missing: bool = False,
-#    real_data_partition: str = "test",
-#    selected_node_only: bool = True,
-#    selection_strategy: str = "random",
-#):
-#    """Instruct clients to generate synthetic data and optionally upload it to S3."""
-#    # Optionally select a single node for pool generation
-#    selected_node_ids = list(node_ids)
-#
-#    if selected_node_only and node_ids:
-#        if selection_strategy == "random":
-#            selected_node_ids = [choice(node_ids)]
-#        elif selection_strategy == "best":
-#            # Attempt to query the data catalogue for node capabilities. If the
-#            # catalogue does not support node info, fall back to random selection.
-#            try:
-#                catalogue_client = DataCatalogueClient(base_url=config.DATA_CATALOGUE_URL)
-#                # If the catalogue client exposes a method to fetch node info, use it.
-#                if hasattr(catalogue_client, "get_node_info"):
-#                    best_node = None
-#                    best_score = -1
-#                    for nid in node_ids:
-#                        node_name = f"NODE{nid}"
-#                        info = catalogue_client.get_node_info(node_name)
-#                        # Support a few possible scoring keys
-#                        score = 0
-#                        if isinstance(info, dict):
-#                            score = info.get("score") or info.get("cpu_cores") or info.get("cpu") or info.get("capacity") or 0
-#                        try:
-#                            s = float(score)
-#                        except Exception:
-#                            s = 0
-#                        if s > best_score:
-#                            best_score = s
-#                            best_node = nid
-#                    if best_node is not None:
-#                        selected_node_ids = [best_node]
-#                    else:
-#                        selected_node_ids = [choice(node_ids)]
-#                else:
-#                    selected_node_ids = [choice(node_ids)]
-#            except Exception:
-#                selected_node_ids = [choice(node_ids)]
-#        else:
-#            # Unknown strategy: fallback to random
-#            selected_node_ids = [choice(node_ids)]
-#
-#    # Run the execution flow but don't force global failure — collect partial results
-#    replies = execution_flow(
-#        driver=driver,
-#        node_ids=selected_node_ids,
-#        recordset_factory=interfaces.recordset.create_generate_synthetic_recordset,
-#        msg_type=MessageType.QUERY,
-#        msg_group="generate_synthetic",
-#        recordset_factory_args=(use_case, n_samples, sdg_model_name, dataset_meta_json, upload_to_s3, s3_bucket, create_s3_bucket_if_missing, real_data_partition),
-#        check_success=False,
-#    )
-
-    # Aggregate replies: extract per-node result (s3 URIs, local paths, errors)
-#    aggregated = {"successes": [], "failures": [], "registered_pools": []}
-
-#    for msg in replies:
-#        try:
-#            cfg = msg.content.configs_records.get("config", {})
-#        except Exception:
-#            cfg = {}
-
-#        success = cfg.get("success", False)
-#        result = cfg.get("result")
-
-        # Determine node id/source: prefer explicit node_name from result payload
-#        node_src = None
-#        if isinstance(result, dict):
-#            node_src = result.get("node_name")
-
-        # Fallback to msg attribute if available
-#        if not node_src and hasattr(msg, "src_node_id"):
-#            node_src = getattr(msg, "src_node_id")
-
-#        entry = {"node": node_src, "success": success, "result": result, "raw_config": cfg}
-#        if success:
-#            aggregated["successes"].append(entry)
-
-            # Register successful pool to data catalogue
-#            if node_src and isinstance(result, dict):
-#                try:
-#                    pool_metadata = {
-#                        "node_name": node_src,
-#                        "n_samples": n_samples,
-#                        "s3_uris": result.get("s3_uris", {}),
-#                        "local_paths": result.get("local_paths", {}),
-#                        "validation_reports": {
-#                            "utility_uri": result.get("s3_uris", {}).get("utility_report"),
-#                            "privacy_uri": result.get("s3_uris", {}).get("privacy_report"),
-#                        }
-#                    }
-#                    catalogue_client = DataCatalogueClient(base_url=config.DATA_CATALOGUE_URL)
-#                    pool_record = catalogue_client.register_synthetic_pool(
-#                        use_case=use_case,
-#                        sdg_model_name=sdg_model_name,
-#                        pool_metadata=pool_metadata
-#                    )
-#                    aggregated["registered_pools"].append(pool_record)
-#                    logger.info(f"Registered synthetic pool {pool_record.get('pool_id')} from node {node_src}")
-#                except Exception as e:
-#                    logger.error(f"Failed to register pool from node {node_src}: {e}")
-                    # Don't fail the entire flow, just log the error
-#        else:
-            # include message text if available
-#            message_text = cfg.get("message") if isinstance(cfg, dict) else None
-#            aggregated["failures"].append({**entry, "message": message_text})
-
-#    return aggregated
-
-
-def approve_synthetic_pool(pool_id: str) -> dict:
-    """
-    Approve a synthetic data pool for publication.
-    Called by the expert validation committee.
-    """
-    try:
-        catalogue_client = DataCatalogueClient(base_url=config.DATA_CATALOGUE_URL)
-        approval_result = catalogue_client.approve_synthetic_pool(pool_id)
-        logger.info(f"Pool {pool_id} approved. Result: {approval_result}")
-        return {"success": True, "message": f"Pool {pool_id} approved", "result": approval_result}
-    except Exception as e:
-        logger.error(f"Failed to approve pool {pool_id}: {e}")
-        return {"success": False, "message": str(e), "pool_id": pool_id}
-
-
-def reject_synthetic_pool(pool_id: str, reason: str = "") -> dict:
-    """
-    Reject a synthetic data pool.
-    Called by the expert validation committee.
-    """
-    try:
-        catalogue_client = DataCatalogueClient(base_url=config.DATA_CATALOGUE_URL)
-        rejection_result = catalogue_client.reject_synthetic_pool(pool_id, reason)
-        logger.info(f"Pool {pool_id} rejected. Reason: {reason}")
-        return {"success": True, "message": f"Pool {pool_id} rejected", "result": rejection_result}
-    except Exception as e:
-        logger.error(f"Failed to reject pool {pool_id}: {e}")
-        return {"success": False, "message": str(e), "pool_id": pool_id}
-
-
-def get_synthetic_pool_info(pool_id: str) -> dict:
-    """
-    Retrieve detailed information about a synthetic pool.
-    Includes status, validation reports, s3 URIs, etc.
-    """
-    try:
-        catalogue_client = DataCatalogueClient(base_url=config.DATA_CATALOGUE_URL)
-        pool_info = catalogue_client.get_synthetic_pool(pool_id)
-        return {"success": True, "pool": pool_info}
-    except Exception as e:
-        logger.error(f"Failed to fetch pool info for {pool_id}: {e}")
-        return {"success": False, "message": str(e), "pool_id": pool_id}

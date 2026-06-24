@@ -46,7 +46,7 @@ DATA_CATALOGUE_URL = get_env_variable("DATA_CATALOGUE_URL")
 # Tests auth disabler
 try:
     AUTH_DISABLE_TESTS = os.getenv("AUTH_DISABLE_TESTS", False)
-    print("AUTH_DISABLE_TESTS: "+AUTH_DISABLE_TESTS)
+    #print("AUTH_DISABLE_TESTS: "+str (AUTH_DISABLE_TESTS))
 
 except ValueError as e:
     print(e)

@@ -1,5 +1,6 @@
 import asyncio
 import io
+from random import choice
 from typing import cast
 
 import pandas as pd
@@ -7,9 +8,10 @@ import structlog
 from flwr.common import Context, ParametersRecord
 from flwr.server import Driver, ServerApp
 from model_store_interface.catalogue_hook import publish_to_catalogue
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta
+from model_store_interface import DatasetMeta
 
 from fl_server import requires, stages, config
+from fl_server.data_catalogue import DataCatalogueClient
 from fl_server.utils import mlflow_utils
 from fl_server.interfaces import mlflow_client
 from fl_server.interfaces.rabbitmq_client import AsyncRabbitMQClient
@@ -126,7 +128,8 @@ async def execute_training_loop(
 
 
 async def post_training_finalisation(driver: Driver, node_ids: list[int], task: TaskRead) -> None:
-    """Closes the federated loop by orchestrating synthetic generation and catalogue publication."""
+    """Closes the federated loop: synthetic generation, distributed validation and
+    publication of the Big Pool + validation reports to the data catalogue (MinIO)."""
     if not getattr(task, "dataset_meta_json", None):
         logger.warning("No DCAT-AP schema provided. Skipping Big Pool generation and validation.")
         return
@@ -134,23 +137,19 @@ async def post_training_finalisation(driver: Driver, node_ids: list[int], task: 
     # Extract dynamic payload target or fallback to 10k to prevent legacy task failure
     target_samples = getattr(task, "n_samples_synthetic", 10000) or 10000
 
-    logger.info(
-        "Initiating Phase 4: Federated Synthetic Data Generation for AML/SCD",
-        target_samples=target_samples
-    )
+    logger.info("Initiating synthetic data generation", target_samples=target_samples)
 
-    # 1. Instruct the Leader Node to generate the Big Pool
-    leader_node = [node_ids]
-
-    synthetic_payloads = requires.generate_synthetic_data(driver, leader_node, target_samples)
-    synthetic_csv = synthetic_payloads.get(leader_node)
+    # 1. Elect a single leader node to generate the Big Pool
+    leader_id = choice(node_ids)
+    synthetic_payloads = requires.generate_synthetic_data(driver, [leader_id], target_samples)
+    synthetic_csv = synthetic_payloads.get(leader_id)
 
     if not synthetic_csv:
-        logger.error("CRITICAL: Failed to generate synthetic data from the Leader Node.")
+        logger.error("Failed to generate synthetic data from the leader node", leader_id=leader_id)
         return
 
     # 2. Broadcast CSV to all clients for utility/privacy validation against real hold-outs
-    logger.info("Broadcasting Big Pool for Distributed Validation...")
+    logger.info("Broadcasting Big Pool for distributed validation")
     validation_reports = requires.validate_synthetic_data(driver, node_ids, synthetic_csv)
 
     # Extract utility and privacy HTML strings safely from the RPC responses
@@ -161,17 +160,32 @@ async def post_training_finalisation(driver: Driver, node_ids: list[int], task: 
     dataset_meta = DatasetMeta.model_validate_json(task.dataset_meta_json)
     synthetic_df = pd.read_csv(io.StringIO(synthetic_csv))
 
-    # 4. Delegate all heavy payload storage (CSV + HTML Reports) to MinIO via the MSI SDK
-    logger.info("Pushing validated Big Pool and HTML reports directly to Private Data Catalogue...")
+    # 4. Persist the Big Pool + HTML validation reports to the data catalogue (MinIO data plane).
+    #    Kept behind DataCatalogueClient so the writes can later move to the catalogue web API.
+    logger.info("Pushing validated Big Pool and HTML reports to the data catalogue")
+    catalogue = DataCatalogueClient()
+    pool_uri = catalogue.upload_synthetic_pool(task.experiment_name, synthetic_df)
+    report_uris: dict[int, dict[str, str]] = {}
+    for nid in validation_reports:
+        report_uris[nid] = {
+            "utility": catalogue.upload_html_report(task.experiment_name, str(nid), "utility", utility_reports[nid]),
+            "privacy": catalogue.upload_html_report(task.experiment_name, str(nid), "privacy", privacy_reports[nid]),
+        }
+    logger.info("Persisted Big Pool and reports to data catalogue", pool_uri=pool_uri)
+
+    # 5. Forward-looking catalogue registration hook (model-store-interface). Currently a
+    #    placeholder in the SDK; backed here with the real MinIO object URIs.
     publish_to_catalogue(
         synthetic_data=synthetic_df,
         utility_reports=utility_reports,
         privacy_reports=privacy_reports,
         dataset_meta=dataset_meta,
-        experiment_id=task.experiment_name
+        experiment_name=task.experiment_name,
+        pool_uri=pool_uri,
+        report_uris=report_uris,
     )
 
-    logger.info("Phase 4 Finalisation complete. Model is now governed and ready for inference.")
+    logger.info("Finalisation complete. Synthetic pool governed and ready for inference.")
 
 
 async def server_main(task: TaskRead, driver: Driver, context: Context, rabbitmq: AsyncRabbitMQClient) -> None:

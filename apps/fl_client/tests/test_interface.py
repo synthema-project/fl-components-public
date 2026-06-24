@@ -9,7 +9,7 @@ from flwr.common import (
     RecordSet,
     MetricsRecord,
 )
-from model_store_interface.core.schemas.dataset_meta import DatasetMeta, UseCase, Variable
+from model_store_interface import DatasetMeta, UseCase, Variable
 
 from fl_client import interface
 

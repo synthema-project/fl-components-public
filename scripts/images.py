@@ -44,9 +44,18 @@ Examples:
 
 import argparse
 import json
+import shutil
+import subprocess
 from pathlib import Path
 import docker
 from docker.errors import ImageNotFound, APIError, BuildError
+import os
+os.environ["DOCKER_BUILDKIT"] = "1"
+
+# Local checkout of the model-store-interface package (a sibling of the repo root).
+# It cannot be reached from a Docker build context, so we build its wheel and vendor
+# it into each context that needs it (see prepare_msi_wheel / Dockerfile UV_FIND_LINKS).
+MSI_DIRNAME = "app-model_store-interface"
 
 
 # ------------------------------------------------------------------------------
@@ -101,23 +110,74 @@ def get_context_path(root_dir, image_path):
 
 
 # ------------------------------------------------------------------------------
+# model-store-interface wheel vendoring
+# ------------------------------------------------------------------------------
+def prepare_msi_wheel(root_dir, context_path):
+    """Build the model-store-interface wheel and vendor it into the build context.
+
+    The Docker build context cannot reach the sibling ``app-model_store-interface``
+    repo, so we build its wheel and copy it into ``<context>/wheels/`` where the
+    Dockerfile installs it via ``UV_FIND_LINKS`` during ``uv sync``.
+    """
+    interface_dir = (root_dir.parent / MSI_DIRNAME).resolve()
+    if not interface_dir.exists():
+        print(f"[ERROR] model-store-interface repo not found at {interface_dir}")
+        return False
+
+    print("[INFO] Building model-store-interface wheel...")
+    if subprocess.run(["uv", "build", "--wheel"], cwd=str(interface_dir)).returncode != 0:
+        print("[ERROR] Failed to build model-store-interface wheel")
+        return False
+
+    wheels_dir = context_path / "wheels"
+    wheels_dir.mkdir(exist_ok=True)
+    for stale in wheels_dir.glob("model_store_interface-*.whl"):
+        stale.unlink()
+    copied = 0
+    for whl in (interface_dir / "dist").glob("model_store_interface-*.whl"):
+        shutil.copy2(whl, wheels_dir / whl.name)
+        copied += 1
+    if copied == 0:
+        print("[ERROR] No model-store-interface wheel found after build")
+        return False
+    print(f"[OK] Vendored {copied} model-store-interface wheel(s) into {wheels_dir}")
+    return True
+
+
+# ------------------------------------------------------------------------------
 # Docker Operations
 # ------------------------------------------------------------------------------
 def build_image(client, image_def, image_tag, root_dir, base_image=None):
-    """Build a Docker image."""
+    """Build a Docker image.
+
+    Uses the Docker CLI with BuildKit enabled, since the docker-py SDK does not
+    support BuildKit (required by Dockerfiles that use `RUN --mount=...`).
+    """
     path = get_context_path(root_dir, image_def["path"])
     full_tag = f"{image_def['name']}:{image_tag}"
+
+    # Images that depend on model-store-interface need its wheel vendored into the context.
+    if image_def.get("msi"):
+        if not prepare_msi_wheel(root_dir, path):
+            return False
+
     build_args = {"CURRENT_VERSION": image_tag} if image_def.get("buildargs") else {}
     if base_image:
         build_args["BASE_IMAGE"] = base_image
 
-    try:
-        client.images.build(path=str(path), tag=full_tag, rm=True, buildargs=build_args, platform="linux/amd64")
-        print(f"[OK] Built image: {full_tag}")
-        return True
-    except (BuildError, APIError) as e:
-        print(f"[ERROR] Failed to build {full_tag}: {e}")
+    cmd = ["docker", "build", "--rm", "--platform", "linux/amd64", "-t", full_tag]
+    for key, value in build_args.items():
+        cmd += ["--build-arg", f"{key}={value}"]
+    cmd.append(str(path))
+
+    env = {**os.environ, "DOCKER_BUILDKIT": "1"}
+    result = subprocess.run(cmd, env=env)
+    if result.returncode != 0:
+        print(f"[ERROR] Failed to build {full_tag}")
         return False
+
+    print(f"[OK] Built image: {full_tag}")
+    return True
 
 
 def tag_image(client, config, old_tag, new_tag):

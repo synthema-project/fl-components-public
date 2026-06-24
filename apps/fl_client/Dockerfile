@@ -8,11 +8,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 COPY pyproject.toml ./
+COPY wheels/ /wheels/
 RUN touch README.md
 
 RUN uv venv .venv
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
+ENV UV_FIND_LINKS=/wheels
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --group dev
