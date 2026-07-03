@@ -25,7 +25,7 @@ class UserClaims(BaseModel):
     sub: str
     typ: str
     azp: str
-    session_state: str
+    session_state: Optional[str] = None
     scope: str
     sid: str
     synthema_roles: List[str] = Field(alias="synthemaRoles", default_factory=list)
