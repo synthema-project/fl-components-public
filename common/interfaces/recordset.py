@@ -1,27 +1,58 @@
+import json
+
 from flwr.common import ConfigsRecord, ParametersRecord, RecordSet
 
 
-def create_filter_clients_recordset(use_case: str) -> RecordSet:
-    configsrecord = ConfigsRecord({"mode": "filter_clients", "use_case": use_case})
+def _read_node_dataset_map(config: ConfigsRecord) -> dict[str, list[str]]:
+    """Decode the JSON-encoded ``{node_name: [minio_url, ...]}`` catalogue map.
+
+    ``ConfigsRecord`` only allows scalar (and list-of-scalar) values, so the
+    per-node dataset assignment is transported as a JSON string.
+    """
+    raw = config.get("node_dataset_map", "{}")
+    if not isinstance(raw, str):
+        raise TypeError(f"node_dataset_map must be a JSON string, received {type(raw)}")
+    node_dataset_map = json.loads(raw)
+    if not isinstance(node_dataset_map, dict):
+        raise TypeError(
+            f"node_dataset_map must decode to a dict, received {type(node_dataset_map)}"
+        )
+    return node_dataset_map
+
+
+def create_filter_clients_recordset(
+        use_case: str,
+        node_dataset_map: dict[str, list[str]],
+) -> RecordSet:
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "filter_clients",
+            "use_case": use_case,
+            "node_dataset_map": json.dumps(node_dataset_map),
+        }
+    )
     return RecordSet(configs_records={"config": configsrecord})
 
 
-def read_filter_clients_recordset(recordset: RecordSet) -> str:
-    use_case = recordset.configs_records["config"]["use_case"]
+def read_filter_clients_recordset(
+        recordset: RecordSet,
+) -> tuple[str, dict[str, list[str]]]:
+    config = recordset.configs_records["config"]
+    use_case = config["use_case"]
     if not isinstance(use_case, str):
         raise TypeError(f"use_case must be a string, received {type(use_case)}")
-    return use_case
+    return use_case, _read_node_dataset_map(config)
 
 
 def create_load_data_recordset(
         use_case: str,
-        dataset_paths: list[str],
+        node_dataset_map: dict[str, list[str]],
 ) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
             "mode": "load_data",
             "use_case": use_case,
-            "dataset_paths": dataset_paths,
+            "node_dataset_map": json.dumps(node_dataset_map),
         }
     )
 
@@ -30,21 +61,16 @@ def create_load_data_recordset(
     )
 
 
-def read_load_data_recordset(recordset: RecordSet) -> tuple[str, list[str]]:
+def read_load_data_recordset(
+        recordset: RecordSet,
+) -> tuple[str, dict[str, list[str]]]:
     config = recordset.configs_records["config"]
 
     use_case = config["use_case"]
-    dataset_paths = config.get("dataset_paths", [])
-
     if not isinstance(use_case, str):
         raise TypeError(f"use_case must be a string, received {type(use_case)}")
 
-    if not isinstance(dataset_paths, list):
-        raise TypeError(
-            f"dataset_paths must be a list, received {type(dataset_paths)}"
-        )
-
-    return use_case, dataset_paths
+    return use_case, _read_node_dataset_map(config)
 
 
 def create_prepare_data_recordset() -> RecordSet:

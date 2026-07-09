@@ -32,6 +32,14 @@ class TaskBase(SQLModel):
     noise_multiplier: Optional[int] = Field(default=None)
     clipping_norm: Optional[int] = Field(default=None)
     dataset_meta_json: Optional[str] = Field(default=None, description="Serialised DCAT-AP metadata schema")
+    node_dataset_map_json: Optional[str] = Field(
+        default=None,
+        description=(
+            "JSON-encoded {node_name: [minio_url, ...]} dataset assignment for this "
+            "task's use_case, resolved from the data catalogue at task-creation time. "
+            "Broadcast to clients so each participates/loads by its NODE_NAME."
+        ),
+    )
     n_samples_synthetic: Optional[int] = Field(
         default=10000,
         description="The number of synthetic patient records to generate post-training"

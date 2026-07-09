@@ -29,8 +29,12 @@ def set_dp_config_if(msg: Message, global_vars: dict) -> Message:
 
 
 def load_data_if(msg: Message, global_vars: dict) -> Message:
-    use_case, dataset_paths = recordset.read_load_data_recordset(msg.content)
+    use_case, node_dataset_map = recordset.read_load_data_recordset(msg.content)
 
+    node_name = global_vars["node_name"]
+    dataset_paths = node_dataset_map.get(node_name, [])
+
+    global_vars["use_case"] = use_case
     stages.load_data(use_case, dataset_paths, global_vars)
 
     return responses_utils.create_success_response(
@@ -185,10 +189,35 @@ def clean_config_if(msg: Message) -> Message:
 
 
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
-    use_case = recordset.read_filter_clients_recordset(msg.content)
-    if use_case == global_vars["use_case"]:
-        return responses_utils.create_participate_response(msg, True)
-    return responses_utils.create_participate_response(msg, False)
+    """Participate iff the catalogue assigned this node data for the task use case.
+
+    The use case is defined at dataset-upload time (e.g. ``"AML-1"``, ``"SCD-3"``);
+    the server broadcasts the ``{node_name: [minio_url, ...]}`` map and each client
+    selects its own slice by ``NODE_NAME``.
+    """
+    use_case, node_dataset_map = recordset.read_filter_clients_recordset(msg.content)
+
+    node_name = global_vars["node_name"]
+    assigned_paths = node_dataset_map.get(node_name, [])
+    participate = bool(assigned_paths)
+
+    if participate:
+        global_vars["use_case"] = use_case
+        global_vars["assigned_dataset_paths"] = assigned_paths
+        logger.info(
+            "Participating in task",
+            node_name=node_name,
+            use_case=use_case,
+            datasets=assigned_paths,
+        )
+    else:
+        logger.info(
+            "Declining task: no datasets assigned for use case",
+            node_name=node_name,
+            use_case=use_case,
+        )
+
+    return responses_utils.create_participate_response(msg, participate)
 
 
 def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:

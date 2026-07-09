@@ -70,7 +70,11 @@ async def _process_task(
         await rabbitmq_status.publish_message(task_status.model_dump_json())
 
         # Run the FL process
-        await run_server_app(app, superlink_url)
+        await asyncio.to_thread(
+            run_server_app,
+            app,
+            superlink_url,
+        )
 
         # Publish "success" status
         task_status = TaskStatus(id=task.id, status=Status.SUCCESS)

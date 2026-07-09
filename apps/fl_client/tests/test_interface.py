@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -16,23 +17,31 @@ from fl_client import interface
 
 @patch("fl_client.interface.stages.load_data")
 def test_load_data_if_success(load_data_mock):
-    global_vars = dict()
-    configs_records = {"config": ConfigsRecord({"use_case": "iris"})}
+    global_vars = {"node_name": "HULAFE"}
+    node_dataset_map = {"HULAFE": ["synthema-catalogue/aml/hulafe.csv"]}
+    configs_records = {
+        "config": ConfigsRecord(
+            {"use_case": "AML-1", "node_dataset_map": json.dumps(node_dataset_map)}
+        )
+    }
     msg = Message(
         metadata=Mock(spec=Metadata), content=RecordSet(configs_records=configs_records)
     )
 
     rsp = interface.load_data_if(msg, global_vars)
 
-    assert len(global_vars.keys()) == 0
-    assert load_data_mock.called
+    # The client resolves its own datasets by NODE_NAME from the broadcast map.
+    load_data_mock.assert_called_once_with(
+        "AML-1", ["synthema-catalogue/aml/hulafe.csv"], global_vars
+    )
+    assert global_vars["use_case"] == "AML-1"
     assert "config" in rsp.content.configs_records.keys()
     assert rsp.content.configs_records["config"]["success"]
 
 
 @patch("fl_client.interface.stages.load_data")
 def test_load_data_if_error(load_data_mock):
-    global_vars = dict()
+    global_vars = {"node_name": "HULAFE"}
     configs_records = {"config": ConfigsRecord({"use_case": 1})}
     msg = Message(
         metadata=Mock(spec=Metadata), content=RecordSet(configs_records=configs_records)
@@ -275,31 +284,34 @@ def test_clean_config_if(clean_current_config_mock):
 
 
 def test_filter_clients_if_success():
-    global_vars = {"use_case": "test"}
+    node_dataset_map = {"HULAFE": ["synthema-catalogue/aml/hulafe.csv"]}
     configs_records = {
-        "config": ConfigsRecord({"use_case": "test"}),
+        "config": ConfigsRecord(
+            {"use_case": "AML-1", "node_dataset_map": json.dumps(node_dataset_map)}
+        ),
     }
     msg = Message(
         metadata=Mock(spec=Metadata),
         content=RecordSet(configs_records=configs_records),
     )
 
+    # Node has data for the use case → participates.
+    global_vars = {"node_name": "HULAFE", "use_case": None}
     rsp = interface.filter_clients_if(msg, global_vars)
 
-    assert len(global_vars.keys()) == 1
-    assert "participate" in rsp.content.configs_records["config"].keys()
     assert rsp.content.configs_records["config"]["participate"]
+    assert global_vars["use_case"] == "AML-1"
+    assert global_vars["assigned_dataset_paths"] == ["synthema-catalogue/aml/hulafe.csv"]
 
-    # change use_case
-    global_vars["use_case"] = "test2"
-
-    rsp = interface.filter_clients_if(msg, global_vars)
+    # A node absent from the map declines.
+    global_vars_other = {"node_name": "UNKNOWN", "use_case": None}
+    rsp = interface.filter_clients_if(msg, global_vars_other)
 
     assert not rsp.content.configs_records["config"]["participate"]
 
 
 def test_filter_clients_if_error():
-    global_vars = {"use_case": "test"}
+    global_vars = {"node_name": "HULAFE", "use_case": None}
     configs_records = {
         "config": ConfigsRecord({"use_case": 1}),
     }

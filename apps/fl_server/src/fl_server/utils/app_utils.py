@@ -7,7 +7,7 @@ from flwr.server import ServerApp
 from flwr.common.logger import update_console_handler
 
 
-async def run_server_app(
+def run_server_app(
     server_app: ServerApp,
     superlink_url: str,
     root_certificates: Optional[bytes] = None,

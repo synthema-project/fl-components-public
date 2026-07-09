@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 from random import choice
 from typing import cast
 
@@ -47,10 +48,15 @@ async def configure_mlflow(task: TaskRead, driver: Driver, node_ids: list[int]) 
     )
 
 
-async def load_model_and_data(task: TaskRead, driver: Driver, node_ids: list[int]) -> None:
+async def load_model_and_data(
+    task: TaskRead,
+    driver: Driver,
+    node_ids: list[int],
+    node_dataset_map: dict[str, list[str]],
+) -> None:
     """Loads model and prepares data for training."""
     stages.load_model(config.global_vars)
-    requires.load_data(driver, node_ids, task.use_case)
+    requires.load_data(driver, node_ids, task.use_case, node_dataset_map)
     requires.load_model(driver, node_ids, task.model_name, task.model_version)
     requires.prepare_data(driver, node_ids)
 
@@ -207,13 +213,29 @@ async def server_main(task: TaskRead, driver: Driver, context: Context, rabbitmq
 
         logger.info("Clients connected", node_ids=node_ids)
 
-        filtered_node_ids = requires.filter_clients(driver, node_ids, task.use_case)
+        # The REST API resolved the {node_name: [dataset_url]} map from the catalogue
+        # at task-creation time and embedded it in the task; parse it once here.
+        node_dataset_map: dict[str, list[str]] = json.loads(
+            task.node_dataset_map_json or "{}"
+        )
+
+        filtered_node_ids = requires.filter_clients(
+            driver, node_ids, task.use_case, node_dataset_map
+        )
+
+        if not filtered_node_ids:
+            raise RuntimeError(
+                f"No connected clients have datasets registered for use case "
+                f"'{task.use_case}'. Register datasets for this use case in the data "
+                f"catalogue (per node) before launching the task."
+            )
+        logger.info("Clients participating", node_ids=filtered_node_ids)
 
         logger.info("Configuring MLflow and Broadcasting Data Contracts")
         await configure_mlflow(task, driver, filtered_node_ids)
 
         logger.info("Loading model and data")
-        await load_model_and_data(task, driver, filtered_node_ids)
+        await load_model_and_data(task, driver, filtered_node_ids, node_dataset_map)
 
         if getattr(task, "SMPC_enabled", False):
             await set_SMPC_enabled(task, driver, filtered_node_ids)
@@ -258,12 +280,15 @@ async def server_main(task: TaskRead, driver: Driver, context: Context, rabbitmq
 
         logger.info("Federated Training and Validation successful", task_id=task.id)
 
-    except Exception as e:
-        logger.error(f"Task {getattr(task, 'id', 'Unknown')} failed catastrophically: {e}")
-        raise e
+
+    except Exception:
+        logger.exception(
+            "Task failed catastrophically",
+            task_id=task.id,
+        )
+        raise
 
     finally:
-        # ✅ RESTORED MISSING STEP: The Hermetic Closure
         logger.info("Initiating FL Session Closure & MLflow state cleanup")
         try:
             # 1. Command all active Ubuntu edge nodes to close their child runs

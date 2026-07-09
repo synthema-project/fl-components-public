@@ -99,10 +99,10 @@ def create_parent_run(run_name: str, experiment_name: str) -> tuple[str, str]:
     else:
         experiment_id = experiment.experiment_id
 
-    run = mlflow.start_run(
+    run = _mlflow_client.create_run(
         experiment_id=experiment_id,
         run_name=run_name,
-        tags={"mlflow.note.content": "Federated Generative Training Run"}
+        tags={"mlflow.note.content": "Federated Generative Training Run"},
     )
     return run.info.run_id, experiment_id
 

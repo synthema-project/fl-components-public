@@ -1,15 +1,19 @@
-from typing import Sequence
+import json
+from typing import Optional, Sequence
 from fastapi import APIRouter, Response, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlmodel import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import ValidationError
+import requests
 from restapi.db import get_session
 from restapi import config
+from restapi.helpers.data_catalogue import fetch_use_case_datasets
 from interfaces.rabbitmq_client import AsyncRabbitMQClient
 from schemas.task import TaskCreate, TaskRead, TaskStatus
 
-from restapi.auth import UserClaims, require_authentication
+from restapi.auth import UserClaims, oauth2_scheme, require_authentication
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -60,9 +64,31 @@ async def create_task(
     session: AsyncSession = Depends(get_session),
     rabbitmqs: dict[str, AsyncRabbitMQClient] = Depends(get_rabbitmqs),
     current_user: UserClaims = Depends(require_authentication),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(oauth2_scheme),
 ) -> TaskRead:
     try:
+        # Resolve the per-node dataset assignment for this use case from the data
+        # catalogue, forwarding the caller's token (the fl-server never queries the
+        # catalogue itself — it receives this map inside the task message).
+        bearer_token = credentials.credentials if credentials else None
+        try:
+            node_dataset_map = fetch_use_case_datasets(task.use_case, bearer_token)
+        except requests.RequestException as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Could not reach the data catalogue: {e}",
+            )
+        if not node_dataset_map:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"No datasets are registered for use case '{task.use_case}'. "
+                    f"Register datasets (per node) in the data catalogue first."
+                ),
+            )
+
         db_task = TaskRead.model_validate(task)
+        db_task.node_dataset_map_json = json.dumps(node_dataset_map)
         session.add(db_task)
         await session.commit()
         await session.refresh(db_task)

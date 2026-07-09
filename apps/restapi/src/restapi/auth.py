@@ -29,9 +29,9 @@ class UserClaims(BaseModel):
     scope: str
     sid: str
     synthema_roles: List[str] = Field(alias="synthemaRoles", default_factory=list)
-    name: str = Field(alias="given_name", default="")           # was firstName
-    last_name: str = Field(alias="family_name", default="")     # was lastName
-    username: str = Field(alias="preferred_username", default="") # was username
+    name: str = Field(alias="given_name", default="")
+    last_name: str = Field(alias="family_name", default="")
+    username: str = Field(alias="preferred_username", default="")
 
     def has_organization_role(self, organization, role) -> bool:
         for syn_role in self.synthema_roles:
@@ -53,8 +53,7 @@ oauth2_scheme = HTTPBearer(auto_error=False)
 
 public_key= """
 -----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyTxbyXWK2+VMXjk8UvjQOrO2AHchsiRnz5co/PD+C2p+LOPBNdCsG7qKtdOHGUT3FHcGPgs9JB7/nv3Esb+8pkyuDM0BkdyUhN18EZQYXmNokxsWfSjdn/DjY/ulsWtvQD1/hBskFqQEjduGf40CYu5tEmrlahcyIBSGuZNh+QSqStOH5PU6kZdBlkTtVe8rbcJawvozZ3lnpwD2SESHiLZuY5m5ZDUVlsSJ9zdM6cHoQHt8WUvbJIfXClKR4uiFjX1A/Lhif8FsIakrJoUSFl90DEvOOsvjrlbl0oV48FGNTQ3lUBAybafqD+JCC9Ypu0BZAf28IPYZWp0NnW21WwIDAQAB
------END PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw0ycG6p5R0qM37giBV1XejJBoweEOgkmP/U8kjLUKcpbPYIXuTBb2TMCK3p7vHJ8GQokco+qiBd4qiOx4B+fy0qeleNoOWw2jnTpOUdExzjANrGDfh8OB3tmoZUd1yHbfLtnF2A47vrO2KKX5E9zFrZ5pjFaDA8806X1qCGnecBPv9Oi52lZLpH0r/e5SyPfAIOAO/+DT8OPxlizShGlzg5R+Ll1nsJgipBexs1peKgOTrYBmdsgP1SiaCiVamf9xIcghWAX2LPZd2AjynBNyux9ZaDq34lckA20ybpBe+QNpmYvpQScRJNNTqJ3UqD8NkV1W3C1I6M87+pUTeLFnQIDAQAB-----END PUBLIC KEY-----
 """
 
 def get_user_data_from_token(token: str) -> UserClaims:
