@@ -167,7 +167,6 @@ async def post_training_finalisation(driver: Driver, node_ids: list[int], task: 
     synthetic_df = pd.read_csv(io.StringIO(synthetic_csv))
 
     # 4. Persist the Big Pool + HTML validation reports to the data catalogue (MinIO data plane).
-    #    Kept behind DataCatalogueClient so the writes can later move to the catalogue web API.
     logger.info("Pushing validated Big Pool and HTML reports to the data catalogue")
     catalogue = DataCatalogueClient()
     pool_uri = catalogue.upload_synthetic_pool(task.experiment_name, synthetic_df)
@@ -179,17 +178,20 @@ async def post_training_finalisation(driver: Driver, node_ids: list[int], task: 
         }
     logger.info("Persisted Big Pool and reports to data catalogue", pool_uri=pool_uri)
 
-    # 5. Forward-looking catalogue registration hook (model-store-interface). Currently a
-    #    placeholder in the SDK; backed here with the real MinIO object URIs.
-    publish_to_catalogue(
-        synthetic_data=synthetic_df,
-        utility_reports=utility_reports,
-        privacy_reports=privacy_reports,
-        dataset_meta=dataset_meta,
-        experiment_name=task.experiment_name,
-        pool_uri=pool_uri,
-        report_uris=report_uris,
-    )
+    # 5. Register the pool in the catalogue so it enters the dashboard's
+    #    expert-committee review queue (status "pending_approval"). A failure here
+    #    must not lose the already-persisted pool, so it is logged, not raised.
+    try:
+        catalogue.register_synthetic_pool(
+            use_case=task.use_case,
+            sdg_model_name=task.model_name,
+            node_name="federated",
+            n_samples=len(synthetic_df),
+            pool_object=pool_uri,
+            report_objects=report_uris,
+        )
+    except Exception as e:  # noqa: BLE001 - best-effort registration
+        logger.error("Failed to register synthetic pool for review", error=str(e))
 
     logger.info("Finalisation complete. Synthetic pool governed and ready for inference.")
 

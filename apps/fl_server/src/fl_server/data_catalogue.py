@@ -107,3 +107,62 @@ class DataCatalogueClient:
         )
         logger.info("Uploaded validation report to MinIO", object_name=object_name, report_type=report_type)
         return object_name
+
+    # ------------------------------------------------------------------
+    # Catalogue HTTP API (writes) — register the pool for expert-committee review
+    # ------------------------------------------------------------------
+    def register_synthetic_pool(
+        self,
+        use_case: str,
+        sdg_model_name: str,
+        node_name: str,
+        n_samples: int,
+        pool_object: str,
+        report_objects: Dict[str, Dict[str, str]],
+    ) -> dict:
+        """Register the generated Big Pool in the catalogue so it appears in the
+        dashboard's expert-committee review queue (status ``pending_approval``).
+
+        ``pool_object`` and the values in ``report_objects`` are MinIO object names
+        (as returned by ``upload_synthetic_pool`` / ``upload_html_report``); we store
+        them as ``s3://<bucket>/<object>`` URIs. Making those browser-openable is a
+        follow-up (a public MinIO URL or a catalogue report-download endpoint).
+        """
+
+        def _s3(obj: str) -> str:
+            return f"s3://{self.bucket_name}/{obj}"
+
+        validation_reports: Dict[str, str] = {}
+        for nid, reports in report_objects.items():
+            for report_type, obj in reports.items():
+                if obj:
+                    validation_reports[f"node_{nid}_{report_type}_uri"] = _s3(obj)
+
+        pool_metadata = {
+            "node_name": node_name,
+            "n_samples": int(n_samples),
+            "s3_uris": {"pool_uri": _s3(pool_object)},
+            "local_paths": {},
+            "validation_reports": validation_reports,
+        }
+
+        headers = {}
+        token = os.getenv("CATALOGUE_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        response = requests.post(
+            f"{self.base_url}/synthetic-pools",
+            params={"use_case": use_case, "sdg_model_name": sdg_model_name},
+            json=pool_metadata,
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
+        logger.info(
+            "Registered synthetic pool for expert-committee review",
+            pool_id=result.get("pool_id"),
+            use_case=use_case,
+        )
+        return result

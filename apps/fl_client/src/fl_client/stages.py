@@ -17,7 +17,7 @@ import os
 from interfaces import mlflow_client
 from model_store_interface import validation
 from model_store_interface.core.dataset_partition import DatasetPartition
-from model_store_interface import DatasetMeta
+from model_store_interface import DatasetMeta, UseCase
 
 from fl_client import smpc_pb2
 from fl_client.SMPCClient import SMPCClient
@@ -55,10 +55,48 @@ def set_run_config(
     mlflow_client.set_dataset_signature(node_name, data_path, child_run_id)
 
 
+def _partition_of(path: str):
+    """Map a dataset object path to its partition by filename suffix, else None."""
+    p = path.lower()
+    if p.endswith("_train.csv"):
+        return DatasetPartition.TRAIN
+    if p.endswith("_val.csv"):
+        return DatasetPartition.VAL
+    if p.endswith("_test.csv"):
+        return DatasetPartition.TEST
+    return None
+
+
+def _hydrate_dataset_meta(meta_path: str, global_vars: dict) -> None:
+    """Download and parse the DatasetMeta schema JSON from MinIO into global_vars."""
+    try:
+        local_meta = download_object(meta_path)
+        with open(local_meta, encoding="utf-8") as f:
+            dataset_meta = DatasetMeta.model_validate_json(f.read())
+        if isinstance(dataset_meta.use_case, str):
+            dataset_meta = dataset_meta.model_copy(
+                update={"use_case": UseCase(dataset_meta.use_case)}
+            )
+        global_vars["dataset_meta"] = dataset_meta
+        logger.info(f"Hydrated DatasetMeta schema from MinIO ({meta_path})")
+    except Exception as e:
+        logger.error(f"Failed to hydrate DatasetMeta from MinIO: {e}")
+
+
 def load_data(
         use_case: str, dataset_paths: list[str], global_vars: dict
 ) -> None:
-    """Loads and mathematically partitions the clinical tabular data."""
+    """Load this node's datasets and populate the train/val/test partitions.
+
+    Two shapes are supported:
+
+    * **Pre-split** (from the data-ingestor): the assigned paths include
+      ``*_train.csv`` / ``*_val.csv`` / ``*_test.csv`` and a ``*_meta.json``
+      DatasetMeta schema. Each CSV is loaded straight into its partition and the
+      schema hydrates ``global_vars["dataset_meta"]``.
+    * **Single CSV** (legacy): a plain CSV is concatenated and split 60/20/20
+      client-side (fixed random_state for deterministic splits across nodes).
+    """
     if not dataset_paths:
         raise ValueError(
             f"No dataset paths received for node {global_vars['node_name']}"
@@ -66,16 +104,40 @@ def load_data(
 
     logger.info(f"Loading real clinical data from {dataset_paths}...")
 
-    dataframes = []
-    for object_path in dataset_paths:
-        local_file = download_object(object_path)
-        df = pd.read_csv(local_file)
-        dataframes.append(df)
+    meta_paths = [p for p in dataset_paths if p.lower().endswith(".json")]
+    data_paths = [p for p in dataset_paths if not p.lower().endswith(".json")]
 
+    partition_paths: dict = {}
+    plain_csvs: list[str] = []
+    for p in data_paths:
+        part = _partition_of(p)
+        if part is not None:
+            partition_paths[part] = p
+        else:
+            plain_csvs.append(p)
+
+    # Hydrate the model's variable schema from MinIO (needed by prepare_data).
+    if meta_paths:
+        _hydrate_dataset_meta(meta_paths[0], global_vars)
+
+    if partition_paths:
+        loaded = {}
+        for part, path in partition_paths.items():
+            loaded[part] = pd.read_csv(download_object(path))
+        for part in (DatasetPartition.TRAIN, DatasetPartition.VAL, DatasetPartition.TEST):
+            global_vars[part] = loaded.get(part, pd.DataFrame())
+        frames = [df for df in loaded.values() if not df.empty]
+        global_vars["data"] = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        return
+
+    # Legacy fallback: concatenate plain CSVs and split 60/20/20 client-side.
+    if not plain_csvs:
+        raise ValueError(
+            f"No CSV datasets to load for node {global_vars['node_name']}"
+        )
+    dataframes = [pd.read_csv(download_object(p)) for p in plain_csvs]
     data = pd.concat(dataframes, ignore_index=True)
 
-    # Strict DevSecOps Partitioning (60% Train, 20% Val, 20% Test)
-    # The fixed random_state guarantees deterministic splits across all Ubuntu edge nodes
     shuffled_data = data.sample(frac=1.0, random_state=42).reset_index(drop=True)
     n_samples = len(shuffled_data)
     train_end = int(n_samples * 0.6)
