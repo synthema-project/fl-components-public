@@ -87,6 +87,21 @@ async def create_task(
                 ),
             )
 
+        # Restrict the run to the nodes the caller selected (if any). Absent /
+        # empty selection keeps the previous behaviour of using every node.
+        selected_nodes = getattr(task, "selected_nodes", None)
+        if selected_nodes:
+            unknown = [n for n in selected_nodes if n not in node_dataset_map]
+            if unknown:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Selected node(s) {unknown} are not registered for use "
+                        f"case '{task.use_case}'. Available: {list(node_dataset_map)}."
+                    ),
+                )
+            node_dataset_map = {n: node_dataset_map[n] for n in selected_nodes}
+
         db_task = TaskRead.model_validate(task)
         db_task.node_dataset_map_json = json.dumps(node_dataset_map)
         session.add(db_task)

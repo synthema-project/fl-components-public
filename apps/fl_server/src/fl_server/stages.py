@@ -1,7 +1,11 @@
 from typing import Any
 from fl_server.utils.dp_utils import add_gaussian_noise_global_parameters
 from flwr.common import Message, ParametersRecord, MetricsRecord
-from interfaces import mlflow_client
+# Use the fl_server-local mlflow client — the one the server actually
+# initializes (main.setup_mlflow) and configures (configure_mlflow). Importing
+# the shared `interfaces.mlflow_client` here hit a second, never-initialized
+# module and raised "expects True, received False" in load_model().
+from fl_server.interfaces import mlflow_client
 
 
 def load_model(

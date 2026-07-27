@@ -10,10 +10,13 @@ def check_success_clients(
                 f"Client {msg.metadata.src_node_id} raised error {msg.error.code}: {msg.error.reason}"
             )
         else:
-            success = msg.content.configs_records["config"]["success"]
+            config = msg.content.configs_records["config"]
+            success = config["success"]
             if not isinstance(success, bool):
                 raise TypeError(f"Success field must be a boolean, got {type(success)}")
             if success:
-                print(
-                    f"Client {msg.metadata.src_node_id} {str(msg.content.configs_records['config']['message'])}"
-                )
+                # Not every success reply carries a human-readable "message"
+                # (e.g. generate_synthetic_data returns "synthetic_csv" instead),
+                # so fall back gracefully rather than KeyError.
+                detail = config["message"] if "message" in config else "completed successfully"
+                print(f"Client {msg.metadata.src_node_id} {detail}")

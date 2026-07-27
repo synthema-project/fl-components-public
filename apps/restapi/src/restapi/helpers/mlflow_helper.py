@@ -4,6 +4,8 @@ from restapi.auth import get_current_user, require_authentication, UserClaims
 from requests.auth import HTTPBasicAuth
 import requests
 import json
+import time
+from typing import Dict
 from restapi.config import MLFLOW_BASE_URL, MLFLOW_TRACKING_USERNAME, MLFLOW_TRACKING_PASSWORD
 
 def get_auth():
@@ -300,6 +302,37 @@ def get_all_run_metrics(run_id: str, user: UserClaims = Depends(require_authenti
         metrics[key] = all_values
 
     return {"run_id": run_id, "metrics": metrics}
+
+
+class LogMetricsRequest(BaseModel):
+    """Payload the fl-client sends to log a step's metrics through the proxy.
+
+    ``metrics`` is a flat {name: value} mapping (one training/eval step) that
+    the proxy expands into MLflow's log-batch metric entries, stamping them with
+    the given ``step`` and a server-side timestamp.
+    """
+    run_id: str
+    metrics: Dict[str, float]
+    step: int = 0
+
+
+def log_batch_metrics(payload: LogMetricsRequest, user: UserClaims = Depends(require_authentication)):
+    """Write a batch of metrics to a run, proxying MLflow's log-batch API.
+
+    Mirrors the read side (get_run_metrics / get_all_run_metrics): the client
+    never talks to MLflow directly, it goes through this authenticated proxy.
+    """
+    timestamp = int(time.time() * 1000)
+    body = {
+        "run_id": payload.run_id,
+        "metrics": [
+            {"key": key, "value": float(value), "timestamp": timestamp, "step": payload.step}
+            for key, value in payload.metrics.items()
+        ],
+    }
+    safe_http_request("POST", "/api/2.0/mlflow/runs/log-batch", json=body)
+    return {"run_id": payload.run_id, "logged": len(body["metrics"]), "step": payload.step}
+
 
 def search_model_versions(
     model_name: str,

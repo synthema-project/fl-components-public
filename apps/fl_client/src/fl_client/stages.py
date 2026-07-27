@@ -298,7 +298,16 @@ def upload_model(
 ) -> dict[str, Any]:
     local_learner = global_vars["local_learner"]
     set_model_parameters(latest_parameters, global_vars)
-    model_info: dict[str, Any] = mlflow_client.upload_final_state(local_learner)
+    # Task use case (e.g. "AML-1") from the dataset meta, used to tag the trained
+    # model when the base model version carries no use_case tag.
+    use_case = None
+    dataset_meta = global_vars.get("dataset_meta")
+    if dataset_meta is not None and getattr(dataset_meta, "use_case", None) is not None:
+        uc = dataset_meta.use_case
+        use_case = uc.value if hasattr(uc, "value") else str(uc)
+    model_info: dict[str, Any] = mlflow_client.upload_final_state(
+        local_learner, use_case=use_case
+    )
     return model_info
 
 

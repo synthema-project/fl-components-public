@@ -187,11 +187,13 @@ def test_upload_final_state():
 
                 result = mlflow_client.upload_final_state(final_state)
 
-    mock_log_model.assert_called_once_with(
-        pytorch_model=final_state,
-        artifact_path="model",
-        registered_model_name=uploaded_model_name,
-    )
+    mock_log_model.assert_called_once()
+    _, kwargs = mock_log_model.call_args
+    assert kwargs["artifact_path"] == "model"
+    assert kwargs["registered_model_name"] == uploaded_model_name
+    # Logged as a generic pyfunc wrapping the trained learner (not a torch flavor)
+    assert isinstance(kwargs["python_model"], mlflow_client._TrainedFederatedModel)
+    assert kwargs["python_model"].local_learner is final_state
 
     mock_mlflow_client.update_model_version.assert_called_once_with(
         uploaded_model_name, str(model_version), description

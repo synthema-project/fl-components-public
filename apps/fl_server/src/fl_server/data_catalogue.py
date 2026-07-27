@@ -1,5 +1,6 @@
 import io
 import os
+import time
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -11,6 +12,56 @@ from minio.error import S3Error
 from fl_server.config import DATA_CATALOGUE_URL
 
 logger = structlog.get_logger(__name__)
+
+
+# --- Keycloak service-account auth for the catalogue -------------------------
+# The fl-server authenticates to the (Keycloak-protected) data-catalogue with a
+# service-account (client_credentials) token, the same way the fl-client reaches
+# the restapi. Falls back to a static CATALOGUE_TOKEN when Keycloak is unset.
+_KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL")
+_KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM_NAME")
+_KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID")
+_KEYCLOAK_CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET")
+
+_service_token: Optional[str] = None
+_service_token_exp: float = 0.0
+
+
+def _get_catalogue_token() -> Optional[str]:
+    """Return a bearer token for the catalogue API.
+
+    Prefers a cached Keycloak service-account access token (client_credentials),
+    refreshing it shortly before expiry. When the Keycloak service account is not
+    configured, falls back to a static ``CATALOGUE_TOKEN`` (or None).
+    """
+    global _service_token, _service_token_exp
+    if not (
+        _KEYCLOAK_SERVER_URL
+        and _KEYCLOAK_REALM
+        and _KEYCLOAK_CLIENT_ID
+        and _KEYCLOAK_CLIENT_SECRET
+    ):
+        return os.getenv("CATALOGUE_TOKEN")
+
+    now = time.time()
+    if _service_token and now < _service_token_exp - 30:
+        return _service_token
+
+    response = requests.post(
+        f"{_KEYCLOAK_SERVER_URL}/realms/{_KEYCLOAK_REALM}/protocol/openid-connect/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": _KEYCLOAK_CLIENT_ID,
+            "client_secret": _KEYCLOAK_CLIENT_SECRET,
+        },
+        timeout=10,
+        verify=False,
+    )
+    response.raise_for_status()
+    body = response.json()
+    _service_token = body["access_token"]
+    _service_token_exp = now + float(body.get("expires_in", 300))
+    return _service_token
 
 
 # FIXME: Synthetic pools / reports are written directly to MinIO for now. Long term these
@@ -147,7 +198,7 @@ class DataCatalogueClient:
         }
 
         headers = {}
-        token = os.getenv("CATALOGUE_TOKEN")
+        token = _get_catalogue_token()
         if token:
             headers["Authorization"] = f"Bearer {token}"
 

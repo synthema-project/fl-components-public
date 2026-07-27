@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from restapi.helpers.mlflow_helper import MLFlowUserCreateRequest, UpdatePasswordRequest, UpdateAdminRequest, PermissionRequest
 from restapi.helpers.mlflow_helper import create_user, get_user, update_password, update_admin, delete_user, create_experiment_permission, get_experiment_permission, update_experiment_permission, delete_experiment_permission, create_model_permission, get_model_permission, update_model_permission, delete_model_permission
-from restapi.helpers.mlflow_helper import search_experiments, get_experiment, create_experiment, delete_experiment, restore_experiment, search_runs, get_run, delete_run, restore_run, list_registered_models, get_registered_model, create_registered_model, delete_registered_model, get_model_version, get_model_versions, get_model_download_uri, get_all_run_metrics, get_run_metrics, search_model_versions_by_run
+from restapi.helpers.mlflow_helper import search_experiments, get_experiment, create_experiment, delete_experiment, restore_experiment, search_runs, get_run, delete_run, restore_run, list_registered_models, get_registered_model, create_registered_model, delete_registered_model, get_model_version, get_model_versions, get_model_download_uri, get_all_run_metrics, get_run_metrics, search_model_versions_by_run, log_batch_metrics, LogMetricsRequest
 from restapi.auth import UserClaims, require_authentication
 
 router_admin = APIRouter(prefix="/mlflow-admin", tags=["mlflow-admin"])
@@ -142,6 +142,10 @@ def get_run_metric(run_id: str, key: str,  user: UserClaims = Depends(require_au
 @router.post("/runs/metrics/all")
 def get_run_metrics(run_id: str, user: UserClaims = Depends(require_authentication)):
     return get_all_run_metrics(run_id, user)
+
+@router.post("/runs/metrics/log")
+def log_run_metrics(payload: LogMetricsRequest, user: UserClaims = Depends(require_authentication)):
+    return log_batch_metrics(payload, user)
 
 # --- Models ---
 @router.get("/registered-models/list")

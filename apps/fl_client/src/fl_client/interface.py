@@ -168,8 +168,18 @@ def set_run_config_if(msg: Message, global_vars: dict) -> Message:
             logger.error(f"Catastrophic failure hydrating Pydantic DatasetMeta: {e}")
             global_vars["dataset_meta"] = None
     else:
-        logger.warning("No dataset_meta_json payload received from FL Server.")
+        logger.warning(
+            "No dataset_meta_json payload received from FL Server; "
+            "falling back to the node's *_meta.json in MinIO."
+        )
         global_vars["dataset_meta"] = None
+        # Fallback: the task's assigned paths (set in filter_clients_if) include
+        # the *_meta.json object; hydrate DatasetMeta straight from MinIO so the
+        # client is not left without a schema if the server did not push one.
+        assigned = global_vars.get("assigned_dataset_paths", [])
+        meta_paths = [p for p in assigned if p.lower().endswith(".json")]
+        if meta_paths:
+            stages._hydrate_dataset_meta(meta_paths[0], global_vars)
 
         # Proceed to orchestrate the standard MLflow tracking parameters
     stages.set_run_config(

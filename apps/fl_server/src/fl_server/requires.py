@@ -40,7 +40,10 @@ def execution_flow(
         if per_node_recordset_factory is not None:
             recordset = per_node_recordset_factory(node_id)
         else:
-            recordset = recordset_factory(*recordset_factory_args)
+            # recordset_factory_args defaults to None; guard so zero-arg
+            # factories (e.g. create_clean_config_recordset) don't hit
+            # "argument after * must be an iterable, not NoneType".
+            recordset = recordset_factory(*(recordset_factory_args or ()))
 
         messages.extend(
             driver_utils.create_messages(
@@ -374,7 +377,7 @@ def generate_synthetic_data(
     )
     requires_utils.check_success_clients(all_replies)
     return {
-        msg.metadata.dst_node_id: msg.content.configs_records["config"]["synthetic_csv"]
+        msg.metadata.src_node_id: msg.content.configs_records["config"]["synthetic_csv"]
         for msg in all_replies
     }
 
@@ -404,7 +407,7 @@ def validate_synthetic_data(
     )
     requires_utils.check_success_clients(all_replies)
     return {
-        msg.metadata.dst_node_id: {
+        msg.metadata.src_node_id: {
             "utility": msg.content.configs_records["config"]["utility"],
             "privacy": msg.content.configs_records["config"]["privacy"],
         }

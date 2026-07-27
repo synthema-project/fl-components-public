@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import os
 from random import choice
 from typing import cast
 
@@ -8,6 +9,7 @@ import pandas as pd
 import structlog
 from flwr.common import Context, ParametersRecord
 from flwr.server import Driver, ServerApp
+from minio import Minio
 from model_store_interface.catalogue_hook import publish_to_catalogue
 from model_store_interface import DatasetMeta
 
@@ -19,6 +21,58 @@ from fl_server.interfaces.rabbitmq_client import AsyncRabbitMQClient
 from fl_server.schemas.task import TaskRead
 
 logger = structlog.get_logger(__name__)
+
+
+def _fetch_dataset_meta_json(node_dataset_map: dict[str, list[str]]) -> str | None:
+    """Fetch the DatasetMeta schema (``*_meta.json``) from the MinIO data plane.
+
+    The task carries only dataset *paths*; the DatasetMeta schema itself lives in
+    the ``*_meta.json`` object registered alongside the CSV partitions. The
+    catalogue's own metadata column is DCAT-AP governance data (a different
+    schema), so the schema the clients/finalisation need can only come from the
+    MinIO object. Returns the JSON string, or ``None`` if unavailable.
+    """
+    meta_path = next(
+        (
+            p
+            for paths in node_dataset_map.values()
+            for p in paths
+            if p.lower().endswith(".json")
+        ),
+        None,
+    )
+    if not meta_path:
+        logger.warning("No *_meta.json path in node_dataset_map; cannot hydrate DatasetMeta")
+        return None
+
+    try:
+        endpoint = os.getenv("MINIO_ENDPOINT", "").replace("http://", "").replace("https://", "")
+        client = Minio(
+            endpoint=endpoint,
+            access_key=os.getenv("MINIO_ACCESS_KEY"),
+            secret_key=os.getenv("MINIO_SECRET_KEY"),
+            secure=os.getenv("MINIO_SECURE", "false").lower() == "true",
+        )
+        # Datasets live in the data-plane bucket (data-ingestor's MINIO_BUCKET),
+        # which differs from this server's own MINIO_BUCKET (synthetic pools).
+        bucket = os.getenv("MINIO_DATASET_BUCKET", "data-annotation")
+        # Paths look like "host:port/AML-1_ICH_meta.json"; strip any scheme+host.
+        key = meta_path.split("://", 1)[-1]
+        key = key.split("/", 1)[1] if "/" in key else key
+
+        response = client.get_object(bucket, key)
+        try:
+            return response.read().decode("utf-8")
+        finally:
+            response.close()
+            response.release_conn()
+    except Exception as e:  # noqa: BLE001 - best effort; training must not fail on this
+        logger.warning(
+            "Could not fetch dataset_meta_json from MinIO",
+            meta_path=meta_path,
+            error=str(e),
+        )
+        return None
 
 
 async def configure_mlflow(task: TaskRead, driver: Driver, node_ids: list[int]) -> None:
@@ -33,6 +87,17 @@ async def configure_mlflow(task: TaskRead, driver: Driver, node_ids: list[int]) 
     # 2. Create the MLOps tracking namespace on the Server
     experiment_id, parent_run_id, child_run_id = mlflow_utils.create_mlflow_runs(
         task.run_name, task.experiment_name
+    )
+
+    # 2b. Configure the server's MLflow client for this run. This is what flips
+    # `_configured` to True and loads the model's registry metadata; without it
+    # the subsequent stages.load_model() fails its ensure_bool(_configured) guard.
+    mlflow_client.set_current_config(
+        experiment_id=experiment_id,
+        parent_run_id=parent_run_id,
+        child_run_id=child_run_id,
+        model_name=task.model_name,
+        model_version=task.model_version,
     )
 
     # 3. Broadcast the run IDs and the DCAT-AP schema to all Federated Clients
@@ -99,14 +164,16 @@ async def execute_training_loop(
             driver, node_ids, parameters, current_global_iter=iteration
         )
 
+        # train_model returns list[tuple[ParametersRecord, MetricsRecord]];
+        # split the two so each aggregator receives what it expects.
         # Aggregate the parameters from all clinical edge nodes
         aggregated_parameters = stages.aggregate_parameters(
-            [r for r in train_results], config.global_vars
+            [params for params, _metrics in train_results], config.global_vars
         )
 
         # Aggregate the training telemetry metrics
         aggregated_train_metrics = stages.aggregate_metrics(
-            [r[5] for r in train_results], config.global_vars
+            [metrics for _params, metrics in train_results], config.global_vars
         )
 
         # Distributed Intra-Round Evaluation Phase (Phase 2.2)
@@ -221,6 +288,20 @@ async def server_main(task: TaskRead, driver: Driver, context: Context, rabbitmq
             task.node_dataset_map_json or "{}"
         )
 
+        # The task carries dataset *paths* only; the DatasetMeta schema lives in
+        # the *_meta.json object. Hydrate it from MinIO so both the client push
+        # (configure_mlflow -> set_run_config) and post_training_finalisation
+        # have the schema. Non-fatal: training proceeds even if it's missing.
+        if not getattr(task, "dataset_meta_json", None):
+            meta_json = _fetch_dataset_meta_json(node_dataset_map)
+            if meta_json:
+                task.dataset_meta_json = meta_json
+                logger.info("Hydrated task.dataset_meta_json from MinIO")
+            else:
+                logger.warning(
+                    "dataset_meta_json unavailable; Big Pool generation will be skipped"
+                )
+
         filtered_node_ids = requires.filter_clients(
             driver, node_ids, task.use_case, node_dataset_map
         )
@@ -292,16 +373,22 @@ async def server_main(task: TaskRead, driver: Driver, context: Context, rabbitmq
 
     finally:
         logger.info("Initiating FL Session Closure & MLflow state cleanup")
+        # Run each cleanup step independently: a failure closing the edge-node
+        # runs must not skip the server-side clean_current_config(), which is
+        # what resets `_configured` for the next task.
         try:
-            # 1. Command all active Ubuntu edge nodes to close their child runs
+            # 1. Command all active edge nodes to close their child runs
             if 'filtered_node_ids' in locals() and len(filtered_node_ids) > 0:
                 requires.clean_config(driver, filtered_node_ids)
+        except Exception as cleanup_error:
+            logger.error(f"Failed to close edge-node MLflow runs: {cleanup_error}")
 
-            # 2. Close the server's parent orchestration run
+        try:
+            # 2. Close the server's parent orchestration run (resets _configured)
             mlflow_client.clean_current_config()
             logger.info("MLflow runs successfully transitioned to FINISHED.")
         except Exception as cleanup_error:
-            logger.error(f"Failed to cleanly close MLflow runs: {cleanup_error}")
+            logger.error(f"Failed to close the server MLflow run: {cleanup_error}")
 
 
 def get_serverapp(task: TaskRead, rabbitmq: AsyncRabbitMQClient) -> ServerApp:

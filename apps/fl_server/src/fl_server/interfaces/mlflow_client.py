@@ -6,13 +6,43 @@ from mlflow import MlflowClient
 from mlflow.data.http_dataset_source import HTTPDatasetSource
 from mlflow.data.meta_dataset import MetaDataset
 from mlflow.models.model import ModelInfo
-from mlflow.pyfunc import PyFuncModel, load_model as _load_model
-from mlflow.pytorch import log_model as _log_model
+from mlflow.pyfunc import (
+    PyFuncModel,
+    PythonModel,
+    load_model as _load_model,
+    log_model as _log_model,
+)
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 
 from .utils import ensure_bool, MutableBoolean
 
 logger = structlog.get_logger(__name__)
+
+
+class _TrainedFederatedModel(PythonModel):
+    """Generic pyfunc wrapper for a trained local learner (framework-agnostic,
+    cloudpickled) — mirrors how the untrained FederatedModel is registered, so a
+    scikit GMM / torch module / etc. can all be persisted without
+    ``mlflow.pytorch`` requiring a ``torch.nn.Module``."""
+
+    def __init__(self, local_learner: Any) -> None:
+        self.local_learner = local_learner
+
+    def predict(self, context: Any, model_input: Any = None, params: Any = None) -> Any:
+        n_samples = 1
+        if isinstance(params, dict) and params.get("n_samples") is not None:
+            n_samples = int(params["n_samples"])
+        elif model_input is not None:
+            try:
+                n_samples = int(len(model_input))
+            except TypeError:
+                pass
+        generate = getattr(self.local_learner, "generate_synthetic_data", None)
+        if generate is None:
+            raise NotImplementedError(
+                "Trained learner does not expose generate_synthetic_data()."
+            )
+        return generate(n_samples, getattr(self.local_learner, "dataset_schema", None))
 
 mlflow.set_system_metrics_sampling_interval(0.5)
 
@@ -218,7 +248,7 @@ def upload_final_state(
             run_id=_current_config.parent_run_id,
     ):
         model_info: ModelInfo = _log_model(
-            pytorch_model=local_learner,
+            python_model=_TrainedFederatedModel(local_learner),
             artifact_path="model",
             registered_model_name=name,
         )

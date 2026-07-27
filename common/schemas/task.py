@@ -65,4 +65,7 @@ class TaskRead(TaskBase, table=True):
 
 
 class TaskCreate(TaskBase):
-    pass
+    # Request-only: node names the caller chose to include. The restapi filters
+    # the catalogue's node->dataset map to these before persisting the task. Not
+    # a column on TaskRead, so it is never stored nor sent to the fl-server.
+    selected_nodes: Optional[list[str]] = None

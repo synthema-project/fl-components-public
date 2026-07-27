@@ -1,3 +1,5 @@
+import os
+import time
 from typing import Any, Optional, Self, cast
 
 import mlflow
@@ -7,13 +9,47 @@ from mlflow import MlflowClient
 from mlflow.data.http_dataset_source import HTTPDatasetSource
 from mlflow.data.meta_dataset import MetaDataset
 from mlflow.models.model import ModelInfo
-from mlflow.pyfunc import PyFuncModel, load_model as _load_model
-from mlflow.pytorch import log_model as _log_model
+from mlflow.pyfunc import (
+    PyFuncModel,
+    PythonModel,
+    load_model as _load_model,
+    log_model as _log_model,
+)
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 
 from .utils import ensure_bool, MutableBoolean
 
 logger = structlog.get_logger(__name__)
+
+
+class _TrainedFederatedModel(PythonModel):
+    """Generic pyfunc wrapper for a trained local learner.
+
+    Logs the final trained model the same (framework-agnostic, cloudpickled)
+    way the untrained FederatedModel is registered, instead of a
+    framework-specific flavor. This lets any learner — a scikit GMM, a torch
+    module, etc. — be persisted without ``mlflow.pytorch`` demanding a
+    ``torch.nn.Module``.
+    """
+
+    def __init__(self, local_learner: Any) -> None:
+        self.local_learner = local_learner
+
+    def predict(self, context: Any, model_input: Any = None, params: Any = None) -> Any:
+        n_samples = 1
+        if isinstance(params, dict) and params.get("n_samples") is not None:
+            n_samples = int(params["n_samples"])
+        elif model_input is not None:
+            try:
+                n_samples = int(len(model_input))
+            except TypeError:
+                pass
+        generate = getattr(self.local_learner, "generate_synthetic_data", None)
+        if generate is None:
+            raise NotImplementedError(
+                "Trained learner does not expose generate_synthetic_data()."
+            )
+        return generate(n_samples, getattr(self.local_learner, "dataset_schema", None))
 
 mlflow.set_system_metrics_sampling_interval(0.5)
 
@@ -70,21 +106,58 @@ _configured = MutableBoolean(False)
 _current_config = __Config
 _mlflow_client = cast(MlflowClient, None)
 
+# --- restapi metrics proxy config -------------------------------------------
+# Metrics are logged through the restapi proxy (the same component the dashboard
+# reads them from) instead of writing to MLflow directly. The client
+# authenticates to the proxy with a Keycloak service-account (client_credentials)
+# token. All values come from the environment (wired via Helm).
+_FL_RESTAPI_URL = os.getenv("FL_RESTAPI_URL")
+_KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL")
+_KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM_NAME")
+_KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID")
+_KEYCLOAK_CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET")
 
-# Token workflow only compatible if MLFlow OIDC plugin is active
-def fetch_keycloak_token():
+_service_token: Optional[str] = None
+_service_token_exp: float = 0.0
+
+
+def _get_service_token() -> str:
+    """Return a cached Keycloak service-account access token, refreshing it
+    shortly before expiry.
+
+    Uses the ``client_credentials`` grant so the headless fl-client can
+    authenticate to the restapi metrics proxy without a human user.
+    """
+    global _service_token, _service_token_exp
+    now = time.time()
+    if _service_token and now < _service_token_exp - 30:
+        return _service_token
+    if not (
+        _KEYCLOAK_SERVER_URL
+        and _KEYCLOAK_REALM
+        and _KEYCLOAK_CLIENT_ID
+        and _KEYCLOAK_CLIENT_SECRET
+    ):
+        raise RuntimeError(
+            "Keycloak service-account is not configured "
+            "(need KEYCLOAK_SERVER_URL, KEYCLOAK_REALM_NAME, "
+            "KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET)."
+        )
     response = requests.post(
-        f'{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_SERVER_REALM}/openid-connect/token',
+        f"{_KEYCLOAK_SERVER_URL}/realms/{_KEYCLOAK_REALM}/protocol/openid-connect/token",
         data={
-            "client_id": KEYCLOAK_CLIENT_ID,
-            "client_secret": KEYCLOAK_CLIENT_SECRET,
-            "grant_type": "password",
-            "username": MLFLOW_SERVICE_ACCOUNT_USERNAME,
-            "password": MLFLOW_SERVICE_ACCOUNT_PASSWORD
+            "grant_type": "client_credentials",
+            "client_id": _KEYCLOAK_CLIENT_ID,
+            "client_secret": _KEYCLOAK_CLIENT_SECRET,
         },
+        timeout=10,
+        verify=False,
     )
     response.raise_for_status()
-    return response.json().get("access_token")
+    body = response.json()
+    _service_token = body["access_token"]
+    _service_token_exp = now + float(body.get("expires_in", 300))
+    return _service_token
 
 
 def setup_mlflow(tracking_url: str, is_central_node: bool = False) -> None:
@@ -224,12 +297,15 @@ def load_model() -> PyFuncModel:
 @ensure_bool(_initialized)
 def upload_final_state(
         local_learner: Any,
+        use_case: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Uploads the final model state to MLflow and sets the appropriate tags and metadata.
 
     Args:
         local_learner (Any): The trained model to be uploaded.
+        use_case (Optional[str]): Task use case (from the dataset) used to tag the
+            trained model when the base model version carries no ``use_case`` tag.
 
     Returns:
         dict: A dictionary containing information about the registered model.
@@ -241,7 +317,7 @@ def upload_final_state(
             run_id=_current_config.parent_run_id,
     ):
         model_info: ModelInfo = _log_model(
-            pytorch_model=local_learner,
+            python_model=_TrainedFederatedModel(local_learner),
             artifact_path="model",
             registered_model_name=name,
         )
@@ -250,12 +326,17 @@ def upload_final_state(
     _mlflow_client.update_model_version(
         name, str(version), _current_config.model_description
     )
-    _mlflow_client.set_model_version_tag(
-        name,
-        str(model_info.registered_model_version),
-        "use_case",
-        _current_config.model_tags["use_case"],
-    )
+    # Propagate the use case onto the trained model. Prefer the base model's own
+    # tag; fall back to the task use case (from the dataset) when the base model
+    # was registered without one, and skip if neither is available.
+    resolved_use_case = (_current_config.model_tags or {}).get("use_case") or use_case
+    if resolved_use_case is not None:
+        _mlflow_client.set_model_version_tag(
+            name,
+            str(model_info.registered_model_version),
+            "use_case",
+            resolved_use_case,
+        )
     _mlflow_client.set_model_version_tag(
         name, str(model_info.registered_model_version), "trained", True
     )
@@ -275,13 +356,49 @@ def log_metrics(
         step: int,
 ) -> None:
     """
-    Logs metrics to MLflow for the current child run.
+    Logs metrics for the current child run through the restapi proxy.
+
+    Instead of writing to MLflow directly, the metrics are POSTed to the restapi
+    (the same proxy the dashboard reads them from), which forwards them to
+    MLflow's log-batch API. The client authenticates with a Keycloak
+    service-account token. The target run is the current child run, which lives
+    under the parent run the fl-server manages and finalizes when it uploads the
+    model.
+
+    Falls back to a direct MLflow write only when FL_RESTAPI_URL is unset, so
+    environments that have not been reconfigured keep working.
 
     Args:
         metrics (dict): A dictionary containing metric names and their values.
         step (int): The training step at which the metrics are logged.
     """
-    mlflow.log_metrics(metrics, step=step)
+    numeric: dict[str, float] = {}
+    for key, value in dict(metrics).items():
+        try:
+            numeric[key] = float(value)
+        except (TypeError, ValueError):
+            logger.warning("Skipping non-numeric metric", key=key, value=value)
+    if not numeric:
+        return
+
+    if not _FL_RESTAPI_URL:
+        logger.warning(
+            "FL_RESTAPI_URL not set; logging metrics directly to MLflow"
+        )
+        mlflow.log_metrics(numeric, step=step)
+        return
+
+    response = requests.post(
+        f"{_FL_RESTAPI_URL}/mlflow/runs/metrics/log",
+        json={
+            "run_id": _current_config.child_run_id,
+            "metrics": numeric,
+            "step": step,
+        },
+        headers={"Authorization": f"Bearer {_get_service_token()}"},
+        timeout=15,
+    )
+    response.raise_for_status()
 
 
 @ensure_bool(_configured)
