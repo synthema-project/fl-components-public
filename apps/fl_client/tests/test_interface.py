@@ -211,7 +211,9 @@ def test_set_run_config_if_success(set_run_config_mock):
 
     rsp = interface.set_run_config_if(msg, global_vars)
 
-    assert len(global_vars.keys()) == 2
+    assert len(global_vars.keys()) == 4
+    assert global_vars["model_name"] == "model_name"
+    assert global_vars["model_version"] == 1
     assert set_run_config_mock.called
     assert "success" in rsp.content.configs_records["config"].keys()
     assert rsp.content.configs_records["config"]["success"]

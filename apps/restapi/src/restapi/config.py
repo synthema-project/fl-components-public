@@ -33,14 +33,14 @@ KEYCLOAK_CLIENT_ID = get_env_variable("KEYCLOAK_CLIENT_ID")
 KEYCLOAK_REALM_NAME = get_env_variable("KEYCLOAK_REALM_NAME")
 
 #MLFLOW
-MLFLOW_BASE_URL = get_env_variable("MLFLOW_BASE_URL")
-MLFLOW_TRACKING_USERNAME = get_env_variable("MLFLOW_TRACKING_USERNAME")
-MLFLOW_TRACKING_PASSWORD = get_env_variable("MLFLOW_TRACKING_PASSWORD")
+MLFLOW_BASE_URL = os.getenv("MLFLOW_BASE_URL", os.getenv("MLFLOW_URL", "http://mlflow"))
+MLFLOW_TRACKING_USERNAME = os.getenv("MLFLOW_TRACKING_USERNAME", "")
+MLFLOW_TRACKING_PASSWORD = os.getenv("MLFLOW_TRACKING_PASSWORD", "")
 
 # DATA MANAGEMENT
 FL_USE_CASES = ["AML", "SCD"]
-FL_NODES = get_env_variable("FL_NODES") #IDS []?
-DATA_CATALOGUE_URL = get_env_variable("DATA_CATALOGUE_URL")
+FL_NODES = os.getenv("FL_NODES", "") # IDS []?
+DATA_CATALOGUE_URL = os.getenv("DATA_CATALOGUE_URL", "")
 
 
 # Global object for shared runtime config

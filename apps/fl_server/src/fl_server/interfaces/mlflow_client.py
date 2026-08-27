@@ -1,10 +1,12 @@
+import json
+import tempfile
+from pathlib import Path
 from typing import Any, Optional, Self, cast
 
 import mlflow
 from mlflow import MlflowClient
 from mlflow.models.model import ModelInfo
-from mlflow.pyfunc import PyFuncModel, load_model as _load_model
-from mlflow.pytorch import log_model as _log_model
+from mlflow.pyfunc import PythonModel, PyFuncModel, load_model as _load_model, log_model as _log_model
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 from mlflow.data.meta_dataset import MetaDataset
 from mlflow.data.http_dataset_source import HTTPDatasetSource
@@ -12,6 +14,32 @@ from mlflow.data.http_dataset_source import HTTPDatasetSource
 from .utils import ensure_bool, MutableBoolean
 
 mlflow.set_system_metrics_sampling_interval(0.5)
+
+
+class TrainedFederatedModel(PythonModel):
+    """Generic PyFunc envelope for a trained MSI local learner.
+
+    The learner is intentionally kept behind the MSI factory-shaped method so
+    the FL client can load trained PyTorch, Keras, sklearn, or DP-wrapped
+    implementations without selecting a framework-specific MLflow flavor.
+    """
+
+    def __init__(self, local_learner: Any, metadata_documents: tuple[dict, dict] | None = None) -> None:
+        self.local_learner = local_learner
+        self.metadata_documents = metadata_documents
+
+    def create_local_learner(self, **_: Any) -> Any:
+        return self.local_learner
+
+    def get_metadata_documents(self) -> tuple[dict, dict]:
+        if self.metadata_documents is None:
+            raise RuntimeError("Metadata documents are not available for this trained model")
+        return self.metadata_documents
+
+    def predict(self, context: Any, model_input: Any) -> Any:
+        if hasattr(self.local_learner, "predict"):
+            return self.local_learner.predict(model_input)
+        raise NotImplementedError("This federated learner does not expose prediction")
 
 
 class __Config:
@@ -196,6 +224,7 @@ def load_model() -> PyFuncModel:
 @ensure_bool(_initialized)
 def upload_final_state(
     local_learner: Any,
+    dataset_meta: Any = None,
 ) -> dict[str, Any]:
     """
     Uploads the final model state to MLflow and sets the appropriate tags and metadata.
@@ -209,14 +238,28 @@ def upload_final_state(
     name = f"trained_{_current_config.model_name}"
     if mlflow.active_run():
         mlflow.end_run()
-    with mlflow.start_run(
-        run_id=_current_config.parent_run_id,
-    ):
-        model_info: ModelInfo = _log_model(
-            pytorch_model=local_learner,
-            artifact_path="model",
-            registered_model_name=name,
-        )
+    with tempfile.TemporaryDirectory(prefix="fl-model-metadata-") as temp_dir:
+        artifacts: dict[str, str] = {}
+        if dataset_meta is not None and hasattr(dataset_meta, "to_json"):
+            metadata_json, evaluation_json = dataset_meta.to_json()
+            metadata_path = Path(temp_dir) / "dataset_meta.json"
+            evaluation_path = Path(temp_dir) / "evaluation_config.json"
+            metadata_path.write_text(json.dumps(metadata_json), encoding="utf-8")
+            evaluation_path.write_text(json.dumps(evaluation_json), encoding="utf-8")
+            artifacts = {
+                "dataset_meta": str(metadata_path),
+                "evaluation_config": str(evaluation_path),
+            }
+
+        with mlflow.start_run(
+            run_id=_current_config.parent_run_id,
+        ):
+            model_info: ModelInfo = _log_model(
+                python_model=TrainedFederatedModel(local_learner, (metadata_json, evaluation_json) if artifacts else None),
+                artifact_path="model",
+                registered_model_name=name,
+                artifacts=artifacts or None,
+            )
 
     version = model_info.registered_model_version
     _mlflow_client.update_model_version(

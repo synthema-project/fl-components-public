@@ -54,6 +54,14 @@ def create_load_model_recordset() -> RecordSet:
     )
 
 
+def create_validate_synthetic_pool_recordset(pool_id: str, object_uri: str,
+                                             use_case: str) -> RecordSet:
+    return RecordSet(configs_records={"config": ConfigsRecord({
+        "mode": "validate_synthetic_pool", "pool_id": pool_id,
+        "object_uri": object_uri, "use_case": use_case,
+    })})
+
+
 def create_upload_model_recordset(parametersrecord: ParametersRecord) -> RecordSet:
     configrecord = ConfigsRecord(
         {

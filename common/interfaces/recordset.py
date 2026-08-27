@@ -15,7 +15,9 @@ def read_filter_clients_recordset(recordset: RecordSet) -> str:
 
 def create_load_data_recordset(
     use_case: str,
-    dataset_paths: list[str],
+    dataset_paths: list[str] | dict,
+    metadata_json: str | None = None,
+    evaluation_config_json: str | None = None,
 ) -> RecordSet:
 
     configsrecord = ConfigsRecord(
@@ -23,6 +25,8 @@ def create_load_data_recordset(
             "mode": "load_data",
             "use_case": use_case,
             "dataset_paths": dataset_paths,
+            "metadata_json": metadata_json or "",
+            "evaluation_config_json": evaluation_config_json or "",
         }
     )
 
@@ -31,21 +35,24 @@ def create_load_data_recordset(
     )
 
 
-def read_load_data_recordset(recordset: RecordSet) -> tuple[str, list[str]]:
+def read_load_data_recordset(recordset: RecordSet) -> tuple[str, list[str] | dict, str | None, str | None]:
     config = recordset.configs_records["config"]
 
     use_case = config["use_case"]
     dataset_paths = config.get("dataset_paths", [])
+    metadata_json = config.get("metadata_json", "")
+    evaluation_config_json = config.get("evaluation_config_json", "")
 
     if not isinstance(use_case, str):
         raise TypeError(f"use_case must be a string, received {type(use_case)}")
 
-    if not isinstance(dataset_paths, list):
-        raise TypeError(
-            f"dataset_paths must be a list, received {type(dataset_paths)}"
-        )
+    if not isinstance(dataset_paths, (list, dict)):
+        raise TypeError(f"dataset_paths must be a list or role mapping, received {type(dataset_paths)}")
 
-    return use_case, dataset_paths
+    if not isinstance(metadata_json, str) or not isinstance(evaluation_config_json, str):
+        raise TypeError("metadata_json and evaluation_config_json must be strings")
+
+    return use_case, dataset_paths, metadata_json or None, evaluation_config_json or None
 
 
 def create_prepare_data_recordset() -> RecordSet:
@@ -84,6 +91,33 @@ def create_upload_model_recordset(parametersrecord: ParametersRecord) -> RecordS
 
 def read_upload_model_recordset(recordset: RecordSet) -> ParametersRecord:
     return recordset.parameters_records["parameters"]
+
+
+def create_generate_synthetic_data_recordset(n_samples: int) -> RecordSet:
+    return RecordSet(configs_records={"config": ConfigsRecord({
+        "mode": "generate_synthetic_data",
+        "n_samples": n_samples,
+    })})
+
+
+def create_validate_synthetic_pool_recordset(pool_id: str, object_uri: str,
+                                             use_case: str) -> RecordSet:
+    return RecordSet(configs_records={"config": ConfigsRecord({
+        "mode": "validate_synthetic_pool", "pool_id": pool_id,
+        "object_uri": object_uri, "use_case": use_case,
+    })})
+
+
+def read_validate_synthetic_pool_recordset(recordset: RecordSet) -> tuple[str, str, str]:
+    config = recordset.configs_records["config"]
+    return str(config["pool_id"]), str(config["object_uri"]), str(config["use_case"])
+
+
+def read_generate_synthetic_data_recordset(recordset: RecordSet) -> int:
+    n_samples = recordset.configs_records["config"]["n_samples"]
+    if not isinstance(n_samples, int) or n_samples <= 0:
+        raise ValueError("n_samples must be a positive integer")
+    return n_samples
 
 
 def create_get_parameters_recordset() -> RecordSet:

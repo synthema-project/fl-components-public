@@ -15,7 +15,7 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.11, <3.12"
 flwr = "1.9"
-pandas = "^2.2"
+pandas = ">=2.2.3,<3.0.0"
 mlflow-skinny = "2.19"
 numpy = "^1"
 pydantic = "^2.8.2"
@@ -24,7 +24,7 @@ sqlmodel = "^0.0.21"
 psutil = "^6.0.0"
 structlog = "^25.1.0"
 aio-pika = "^9.5.4"
-model-store-interface = "0.3.0"
+model-store-interface = "0.5.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"

@@ -40,7 +40,12 @@ async def load_model_and_data(
 ) -> None:
     """Loads model and prepares data for training."""
     stages.load_model(config.global_vars)
-    requires.load_data(driver, node_ids, task.use_case)
+    requires.load_data(
+        driver,
+        node_ids,
+        task.use_case,
+        config.global_vars.get("metadata_documents"),
+    )
     requires.load_model(driver, node_ids, task.model_name, task.model_version)
     requires.prepare_data(driver, node_ids)
 
@@ -128,6 +133,16 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
 
     logger.info("Uploading trained model")
     requires.upload_model(driver, filtered_node_ids, parameters)
+
+    if task.num_synthetic_samples > 0:
+        logger.info("Generating and publishing synthetic data")
+        requires.generate_synthetic_data(
+            driver,
+            filtered_node_ids,
+            task.num_synthetic_samples,
+            task.use_case,
+            task.model_name,
+        )
 
     logger.info("Cleaning up MLflow configuration")
     mlflow_client.clean_current_config()

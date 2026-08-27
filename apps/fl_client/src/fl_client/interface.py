@@ -1,6 +1,6 @@
 import threading
 from collections import OrderedDict
-from flwr.common import Message, parameters_to_ndarrays, Parameters
+from flwr.common import Message
 import structlog
 from fl_models.iris.utils import Utils
 from flwr.common.differential_privacy import (
@@ -20,9 +20,9 @@ def set_dp_config_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_success_response(msg, "set dp config successfully")
 
 def load_data_if(msg: Message, global_vars: dict) -> Message:
-    use_case, dataset_paths = recordset.read_load_data_recordset(msg.content)
+    use_case, dataset_paths, metadata_json, evaluation_config_json = recordset.read_load_data_recordset(msg.content)
 
-    stages.load_data(use_case, dataset_paths, global_vars)
+    stages.load_data(use_case, dataset_paths, global_vars, metadata_json, evaluation_config_json)
 
     return responses_utils.create_success_response(
         msg, "loaded data successfully"
@@ -43,6 +43,24 @@ def upload_model_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_upload_model_response(
         msg, model_info["model_id"], model_info["run_id"]
     )
+
+
+def generate_synthetic_data_if(msg: Message, global_vars: dict) -> Message:
+    n_samples = recordset.read_generate_synthetic_data_recordset(msg.content)
+    result = stages.generate_synthetic_data(n_samples, global_vars)
+    return responses_utils.create_synthetic_data_response(
+        msg,
+        result["object_uri"],
+        global_vars["node_name"],
+        result["metadata_uri"],
+        result["evaluation_uri"],
+    )
+
+
+def validate_synthetic_pool_if(msg: Message, global_vars: dict) -> Message:
+    pool_id, object_uri, use_case = recordset.read_validate_synthetic_pool_recordset(msg.content)
+    result = stages.validate_synthetic_pool(pool_id, object_uri, use_case, global_vars)
+    return responses_utils.create_validation_response(msg, result)
 
 def set_smpc_enabled_if(msg: Message, global_vars: dict) -> Message:
     smpc_enabled = recordset.read_set_smpc_enabled_recordset(msg.content)
@@ -133,6 +151,8 @@ def set_run_config_if(msg: Message, global_vars: dict) -> Message:
         content["model_version"],
         global_vars["data_path"],
     )
+    global_vars["model_name"] = content["model_name"]
+    global_vars["model_version"] = content["model_version"]
     return responses_utils.create_success_response(msg, "set run config successfully")
 
 def clean_config_if(msg: Message) -> Message:
@@ -141,7 +161,11 @@ def clean_config_if(msg: Message) -> Message:
 
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
     use_case = recordset.read_filter_clients_recordset(msg.content)
-    if use_case == global_vars["use_case"]:
+    # Each deployment is dedicated to one use case.  When FL_USE_CASE is
+    # configured, reject tasks for another network; when it is not configured,
+    # accept the task instead of applying the obsolete iris default.
+    configured_use_case = global_vars.get("use_case")
+    if not configured_use_case or use_case == configured_use_case:
         return responses_utils.create_participate_response(msg, True)
     return responses_utils.create_participate_response(msg, False)
 

@@ -1,3 +1,4 @@
+import json
 from typing import Any
 from fl_server.utils.dp_utils import add_gaussian_noise_global_parameters
 from flwr.common import Message, ParametersRecord, MetricsRecord
@@ -7,9 +8,19 @@ from interfaces import mlflow_client
 def load_model(
     global_vars: dict[str, Any],
 ) -> None:
+    # Do not leak metadata from a previous task when a legacy model is loaded.
+    global_vars["metadata_documents"] = None
     mlf_model = mlflow_client.load_model()
     global_vars["model"] = mlf_model
-    global_vars["aggregator"] = mlf_model.unwrap_python_model().create_aggregator()
+    python_model = mlf_model.unwrap_python_model()
+    global_vars["aggregator"] = python_model.create_aggregator()
+    if hasattr(python_model, "get_metadata_documents"):
+        try:
+            metadata, evaluation = python_model.get_metadata_documents()
+        except RuntimeError:
+            pass
+        else:
+            global_vars["metadata_documents"] = (json.dumps(metadata), json.dumps(evaluation))
 
 def set_SMPC_enabled(
     smpc_enabled: bool,

@@ -37,44 +37,33 @@ def use_case():
 def test_execution_flow(driver, node_ids):
     rs = RecordSet()
     recordset_factory_mock = MagicMock(return_value=rs)
+    message_ids = ["message-1", "message-2", "message-3"]
+    replies = [MagicMock(spec=Message)]
 
     with (
-        patch.object(
-            driver_utils, "create_messages", return_value=MagicMock(spec=list[Message])
-        ) as create_messages_mock,
-        patch.object(
-            driver_utils, "send_messages", return_value=MagicMock(spec=list[str])
-        ) as send_messages_mock,
-        patch.object(
-            driver_utils, "wait_messages", return_value=MagicMock(spec=list[Message])
-        ) as wait_messages_mock,
+        patch.object(driver_utils, "send_messages", return_value=message_ids) as send_messages_mock,
+        patch.object(driver_utils, "wait_messages", return_value=replies) as wait_messages_mock,
         patch.object(
             requires_utils, "check_success_clients"
         ) as check_success_clients_mock,
     ):
         requires.execution_flow(
-            driver,
-            node_ids,
-            recordset_factory_mock,
-            MessageType.QUERY,
-            "group",
+            driver=driver,
+            node_ids=node_ids,
+            recordset_factory=recordset_factory_mock,
+            msg_type=MessageType.QUERY,
+            msg_group="group",
             recordset_factory_args=("arg1", "arg2"),
             check_success=True,
         )
 
-        recordset_factory_mock.assert_called_once_with("arg1", "arg2")
-        create_messages_mock.assert_called_once_with(
-            driver, rs, MessageType.QUERY, node_ids, "group", DEFAULT_TTL
-        )
-        send_messages_mock.assert_called_once_with(
-            driver, create_messages_mock.return_value
-        )
-        wait_messages_mock.assert_called_once_with(
-            driver, send_messages_mock.return_value
-        )
-        check_success_clients_mock.assert_called_once_with(
-            wait_messages_mock.return_value
-        )
+        assert recordset_factory_mock.call_count == len(node_ids)
+        assert driver.create_message.call_count == len(node_ids)
+        send_args = send_messages_mock.call_args.args
+        assert send_args[0] is driver
+        assert len(send_args[1]) == len(node_ids)
+        wait_messages_mock.assert_called_once_with(driver, message_ids)
+        check_success_clients_mock.assert_called_once_with(replies)
 
 
 def test_filter_clients(driver, node_ids, use_case):
@@ -111,17 +100,31 @@ def test_prepare_data(driver, node_ids):
 
 
 def test_load_data(driver, node_ids, use_case):
-    with patch.object(requires, "execution_flow") as mock_flow:
+    with (
+        patch.object(requires, "execution_flow") as mock_flow,
+        patch.object(requires, "DataCatalogueClient") as client_class,
+        patch.object(requires, "DATA_CATALOGUE_URL", "http://catalogue"),
+        patch.object(requires, "DATA_CATALOGUE_TOKEN", "token"),
+    ):
+        client_class.return_value.get_use_case_datasets.return_value = {"NODE1": ["dataset.csv"]}
+        client_class.return_value.get_use_case_metadata.return_value = ("meta", "evaluation")
         requires.load_data(driver, node_ids, use_case)
 
+    kwargs = mock_flow.call_args.kwargs
     mock_flow.assert_called_once_with(
         driver=driver,
         node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_load_data_recordset,
         msg_type=MessageType.QUERY,
         msg_group="load_data",
-        recordset_factory_args=(use_case,),
+        per_node_recordset_factory=kwargs["per_node_recordset_factory"],
         check_success=True,
+    )
+    recordset = kwargs["per_node_recordset_factory"](1)
+    assert interfaces.recordset.read_load_data_recordset(recordset) == (
+        use_case,
+        ["dataset.csv"],
+        "meta",
+        "evaluation",
     )
 
 

@@ -1,16 +1,16 @@
 from random import choice
-from typing import Callable
 import structlog
 from flwr.common import (
     DEFAULT_TTL,
     MessageType,
     MetricsRecord,
     ParametersRecord,
-    Message,
 )
 from flwr.server import Driver
 
 from fl_server import stages
+from fl_server.config import DATA_CATALOGUE_TOKEN, DATA_CATALOGUE_URL
+from fl_server.data_catalogue import DataCatalogueClient
 from fl_server.utils import driver_utils, requires_utils
 
 import interfaces.recordset
@@ -35,24 +35,24 @@ def execution_flow(
             recordset = per_node_recordset_factory(node_id)
 
         else:
-            recordset = recordset_factory(*recordset_factory_args)
+            recordset = recordset_factory(*(recordset_factory_args or ()))
 
-        message = driver_utils.create_message(
-            driver=driver,
-            node_id=node_id,
-            recordset=recordset,
-            msg_type=msg_type,
-            msg_group=msg_group,
+        message = driver.create_message(
+            content=recordset,
+            message_type=msg_type,
+            dst_node_id=node_id,
+            group_id=msg_group,
+            ttl=DEFAULT_TTL,
         )
 
         messages.append(message)
 
-    driver_utils.send_messages(driver, messages)
+    message_ids = driver_utils.send_messages(driver, messages)
 
-    replies = driver_utils.wait_messages(driver, messages)
+    replies = driver_utils.wait_messages(driver, message_ids)
 
     if check_success:
-        driver_utils.check_replies_success(replies)
+        requires_utils.check_success_clients(replies)
 
     return replies
 
@@ -70,19 +70,34 @@ def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[i
     return filtered_node_ids
 
 
-def load_data(driver, node_ids: list[int], use_case: str):
+def load_data(
+    driver,
+    node_ids: list[int],
+    use_case: str,
+    metadata_documents: tuple[str, str] | None = None,
+):
 
-    catalogue_client = DataCatalogueClient(
-        base_url=DATA_CATALOGUE_URL
-    )
+    if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
+        raise RuntimeError("DATA_CATALOGUE_URL and DATA_CATALOGUE_TOKEN must be configured to load federated datasets")
+
+    catalogue_client = DataCatalogueClient(base_url=DATA_CATALOGUE_URL, token=DATA_CATALOGUE_TOKEN)
 
     node_dataset_map = catalogue_client.get_use_case_datasets(use_case)
+    if metadata_documents is None:
+        metadata_json, evaluation_config_json = catalogue_client.get_use_case_metadata(use_case)
+    else:
+        metadata_json, evaluation_config_json = metadata_documents
 
     def per_node_recordset_factory(node_id: int):
         node_name = f"NODE{node_id}"
         dataset_paths = node_dataset_map.get(node_name, [])
 
-        return create_load_data_recordset(use_case, dataset_paths)
+        return interfaces.recordset.create_load_data_recordset(
+            use_case,
+            dataset_paths,
+            metadata_json,
+            evaluation_config_json,
+        )
 
     execution_flow(
         driver=driver,
@@ -130,6 +145,65 @@ def upload_model(
         recordset_factory_args=(parametersrecord,),
         check_success=True,
     )
+
+
+def generate_synthetic_data(
+    driver: Driver,
+    node_ids: list[int],
+    n_samples: int,
+    use_case: str,
+    model_name: str,
+):
+    selected_node = [choice(node_ids)]
+    replies = execution_flow(
+        driver=driver,
+        node_ids=selected_node,
+        recordset_factory=interfaces.recordset.create_generate_synthetic_data_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="generate_synthetic_data",
+        recordset_factory_args=(n_samples,),
+        check_success=True,
+    )
+    config = replies[0].content.configs_records["config"]
+    object_uri = config.get("object_uri")
+    node_name = config.get("node_name")
+    metadata_uri = config.get("metadata_uri")
+    evaluation_uri = config.get("evaluation_uri")
+    if not all(isinstance(value, str) for value in (object_uri, node_name, metadata_uri, evaluation_uri)):
+        raise RuntimeError("Synthetic-data response did not contain complete object and metadata URIs")
+    if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
+        raise RuntimeError("DATA_CATALOGUE_TOKEN must be configured to register synthetic data")
+    catalogue_client = DataCatalogueClient(base_url=DATA_CATALOGUE_URL, token=DATA_CATALOGUE_TOKEN)
+    catalogue_result = catalogue_client.register_synthetic_pool(
+        use_case=use_case,
+        model_name=model_name,
+        node_name=node_name,
+        n_samples=n_samples,
+        object_uri=object_uri,
+        metadata_uri=metadata_uri,
+        evaluation_uri=evaluation_uri,
+        token=DATA_CATALOGUE_TOKEN,
+    )
+    pool_id = catalogue_result.get("pool_id")
+    if pool_id:
+        validation_replies = execution_flow(
+            driver=driver,
+            node_ids=node_ids,
+            recordset_factory=interfaces.recordset.create_validate_synthetic_pool_recordset,
+            msg_type=MessageType.QUERY,
+            msg_group=f"validate_pool_{pool_id}",
+            recordset_factory_args=(pool_id, object_uri, use_case),
+            check_success=True,
+        )
+        for reply in validation_replies:
+            payload = reply.content.configs_records["validation"]
+            catalogue_client.register_pool_validation(
+                pool_id=pool_id,
+                node_name=str(payload["node_name"]),
+                metrics=dict(payload.get("metrics", {})),
+                report_uri=str(payload["report_uri"]),
+            )
+    return {"object_uri": object_uri, "catalogue": catalogue_result}
 
 
 def get_parameters_from_one_node(

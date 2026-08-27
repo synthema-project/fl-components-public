@@ -1,9 +1,7 @@
 from flwr.client import ClientApp
 from flwr.common import Context, Message
 import structlog
-from fl_client.config import MLFLOW_URL, NODE_NAME, DATA_PATH
-
-logger = structlog.get_logger()
+from fl_client.config import FL_USE_CASE, MLFLOW_URL, NODE_NAME, DATA_PATH
 from fl_client.interface import (
     clean_config_if,
     filter_clients_if,
@@ -23,15 +21,19 @@ from fl_client.interface import (
     set_smpc_enabled_if,
     set_dp_config_if
 )
+from fl_client.interface import generate_synthetic_data_if
+from fl_client.interface import validate_synthetic_pool_if
 
 from interfaces.mlflow_client import setup_mlflow
+
+logger = structlog.get_logger()
 
 global_vars = {
     "data": None,
     "local_learner": None,
     "model": None,
     "model_meta": None,
-    "use_case": "iris",
+    "use_case": FL_USE_CASE,
     "node_name": NODE_NAME,
     "data_path": DATA_PATH,
     "SMPC_enabled": False,
@@ -82,6 +84,10 @@ def query(msg: Message, ctx: Context) -> Message:
 
     elif mode == "upload_model":
         return upload_model_if(msg, global_vars)
+    elif mode == "generate_synthetic_data":
+        return generate_synthetic_data_if(msg, global_vars)
+    elif mode == "validate_synthetic_pool":
+        return validate_synthetic_pool_if(msg, global_vars)
 
     elif mode == "clean_config":
         return clean_config_if(msg)
