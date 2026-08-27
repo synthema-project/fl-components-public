@@ -110,6 +110,7 @@ services:
 
   synthema-fl-restapi:
     image: synthema-fl-restapi:test
+    pull_policy: never  # use the image built in the prior pipeline step; never pull from a registry
     container_name: synthema-fl-restapi
     environment:
       - RABBIT_USERNAME=username

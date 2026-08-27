@@ -1,50 +1,89 @@
+import io
+import json
 import os
+from urllib.parse import urlparse
 from minio import Minio
+from pandas import DataFrame
 
 
 def _get_minio_client() -> Minio:
+    endpoint = os.getenv("MINIO_ENDPOINT")
+    if not endpoint:
+        raise RuntimeError("MINIO_ENDPOINT must be configured")
+    endpoint = endpoint.removeprefix("http://").removeprefix("https://")
     return Minio(
-        endpoint=os.getenv("MINIO_ENDPOINT"),
+        endpoint=endpoint,
         access_key=os.getenv("MINIO_ACCESS_KEY"),
         secret_key=os.getenv("MINIO_SECRET_KEY"),
-        # HTTPS in prod, plain HTTP for the dev MinIO — controlled by env.
-        secure=os.getenv("MINIO_SECURE", "false").lower() == "true",
+        secure=os.getenv("MINIO_SECURE", "true").lower() == "true",
     )
 
 
-def _resolve_object_key(object_path: str) -> str:
-    """Turn a catalogue-stored path into the object key within the bucket.
+def upload_dataframe(data: DataFrame, *, use_case: str, model_name: str, node_name: str) -> str:
+    """Upload generated data and return its stable object-storage URI."""
+    bucket = os.getenv("MINIO_SYNTHETIC_BUCKET", "synthetic-data-for-inference")
+    key = f"{use_case}/{model_name}/{node_name}/synthetic_data.csv"
+    payload = data.to_csv(index=False).encode("utf-8")
+    client = _get_minio_client()
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+    client.put_object(bucket, key, io.BytesIO(payload), length=len(payload), content_type="text/csv")
+    scheme = "https" if os.getenv("MINIO_SECURE", "true").lower() == "true" else "http"
+    return f"{scheme}://{os.getenv('MINIO_ENDPOINT')}/{bucket}/{key}"
 
-    The catalogue prepends the object-storage host (see data_catalogue
-    ``update_use_case``), so a stored value looks like
-    ``obstorageapi.k8s.synthema.rid-intrasoft.eu/AML-1_ICH_train.csv``. We strip
-    that host prefix (configurable) and use the remainder as the object key; the
-    bucket comes from ``MINIO_BUCKET`` and the host from ``MINIO_ENDPOINT``.
-    """
-    key = object_path.split("://", 1)[-1]  # drop any scheme
-    host_prefix = os.getenv(
-        "MINIO_CATALOGUE_HOST_PREFIX", "obstorageapi.k8s.synthema.rid-intrasoft.eu"
-    ).strip("/")
-    if host_prefix and key.startswith(host_prefix + "/"):
-        key = key[len(host_prefix) + 1:]
-    return key.lstrip("/")
+
+def upload_json(payload: dict, *, use_case: str, model_name: str, node_name: str, filename: str) -> str:
+    """Upload a JSON contract beside generated data and return its object URI."""
+    bucket = os.getenv("MINIO_SYNTHETIC_BUCKET", "synthetic-data-for-inference")
+    key = f"{use_case}/{model_name}/{node_name}/{filename}"
+    encoded = json.dumps(payload, indent=2).encode("utf-8")
+    client = _get_minio_client()
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+    client.put_object(bucket, key, io.BytesIO(encoded), length=len(encoded), content_type="application/json")
+    scheme = "https" if os.getenv("MINIO_SECURE", "true").lower() == "true" else "http"
+    return f"{scheme}://{os.getenv('MINIO_ENDPOINT')}/{bucket}/{key}"
+
+
+def upload_html(html: str, *, use_case: str, model_name: str, node_name: str,
+               filename: str) -> str:
+    """Upload a validation report; the validator may later be supplied privately."""
+    bucket = os.getenv("MINIO_SYNTHETIC_BUCKET", "synthetic-data-for-inference")
+    key = f"{use_case}/{model_name}/{node_name}/{filename}"
+    payload = html.encode("utf-8")
+    client = _get_minio_client()
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+    client.put_object(bucket, key, io.BytesIO(payload), length=len(payload), content_type="text/html")
+    scheme = "https" if os.getenv("MINIO_SECURE", "true").lower() == "true" else "http"
+    return f"{scheme}://{os.getenv('MINIO_ENDPOINT')}/{bucket}/{key}"
 
 
 def download_object(object_path: str) -> str:
-    """Download a catalogue-referenced object from this node's MinIO.
-
-    ``object_path`` example:
-        ``obstorageapi.k8s.synthema.rid-intrasoft.eu/AML-1_ICH_train.csv``
-
-    Returns the local temporary file path.
     """
-    object_name = _resolve_object_key(object_path)
-    bucket = os.getenv("MINIO_BUCKET", "data-annotation")
+    object_path example:
+    obstorageapi.k8s.synthema.rid-intrasoft.eu/aml1_NODE1_file.csv
+
+    Returns local temporary file path.
+    """
+
+    parsed = urlparse(object_path if "://" in object_path else f"https://{object_path}")
+
+    configured_endpoint = (os.getenv("MINIO_ENDPOINT") or "").removeprefix("http://").removeprefix("https://")
+    bucket = parsed.netloc
+    if parsed.scheme == "s3":
+        bucket = parsed.netloc
+    elif configured_endpoint:
+        # The catalogue's public URL identifies the MinIO gateway, not the
+        # bucket.  Dataset objects are all stored in the ingestion bucket.
+        bucket = os.getenv("MINIO_BUCKET_NAME", "data-annotation")
+    object_name = parsed.path.lstrip("/")
 
     local_filename = object_name.split("/")[-1]
     local_path = f"/tmp/{local_filename}"
 
     client = _get_minio_client()
+
     client.fget_object(bucket, object_name, local_path)
 
     return local_path

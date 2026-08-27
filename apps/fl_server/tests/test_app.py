@@ -82,7 +82,9 @@ async def test_load_model_and_data(task, driver, node_ids):
         await load_model_and_data(task, driver, node_ids)
 
         mock_load_model.assert_called_once()
-        mock_load_data.assert_called_once_with(driver, node_ids, task.use_case)
+        mock_load_data.assert_called_once_with(
+            driver, node_ids, task.use_case, config.global_vars.get("metadata_documents")
+        )
         mock_load_model_driver.assert_called_once_with(
             driver, node_ids, task.model_name, task.model_version
         )

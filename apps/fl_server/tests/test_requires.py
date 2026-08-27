@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flwr.common import (
     MessageType,
+    DEFAULT_TTL,
     Message,
     RecordSet,
     ParametersRecord,
@@ -36,50 +37,41 @@ def use_case():
 def test_execution_flow(driver, node_ids):
     rs = RecordSet()
     recordset_factory_mock = MagicMock(return_value=rs)
+    message_ids = ["message-1", "message-2", "message-3"]
+    replies = [MagicMock(spec=Message)]
 
     with (
-        patch.object(
-            driver_utils, "create_messages", return_value=MagicMock(spec=list[Message])
-        ) as create_messages_mock,
-        patch.object(
-            driver_utils, "send_messages", return_value=MagicMock(spec=list[str])
-        ) as send_messages_mock,
-        patch.object(
-            driver_utils, "wait_messages", return_value=MagicMock(spec=list[Message])
-        ) as wait_messages_mock,
+        patch.object(driver_utils, "send_messages", return_value=message_ids) as send_messages_mock,
+        patch.object(driver_utils, "wait_messages", return_value=replies) as wait_messages_mock,
         patch.object(
             requires_utils, "check_success_clients"
         ) as check_success_clients_mock,
     ):
-        replies = requires.execution_flow(
+        requires.execution_flow(
             driver=driver,
             node_ids=node_ids,
             recordset_factory=recordset_factory_mock,
             msg_type=MessageType.QUERY,
             msg_group="group",
             recordset_factory_args=("arg1", "arg2"),
+            check_success=True,
         )
 
         assert recordset_factory_mock.call_count == len(node_ids)
-        assert create_messages_mock.call_count == len(node_ids)
-        send_messages_mock.assert_called_once()
-        wait_messages_mock.assert_called_once()
-        # execution_flow is pure transport: it returns the replies verbatim and
-        # does not interpret them (no success validation).
-        assert replies == wait_messages_mock.return_value
-        check_success_clients_mock.assert_not_called()
-
+        assert driver.create_message.call_count == len(node_ids)
+        send_args = send_messages_mock.call_args.args
+        assert send_args[0] is driver
+        assert len(send_args[1]) == len(node_ids)
+        wait_messages_mock.assert_called_once_with(driver, message_ids)
+        check_success_clients_mock.assert_called_once_with(replies)
 
 
 def test_filter_clients(driver, node_ids, use_case):
-    # The node -> dataset map arrives with the task; filter_clients broadcasts it
-    # and does not query the catalogue itself.
-    node_dataset_map = {"HULAFE": ["synthema-catalogue/aml/hulafe.csv"]}
     with (
         patch.object(requires, "execution_flow") as mock_flow,
         patch.object(requires.stages, "filter_clients") as mock_filter_clients,
     ):
-        requires.filter_clients(driver, node_ids, use_case, node_dataset_map)
+        requires.filter_clients(driver, node_ids, use_case)
 
     mock_flow.assert_called_once_with(
         driver=driver,
@@ -87,17 +79,14 @@ def test_filter_clients(driver, node_ids, use_case):
         recordset_factory=interfaces.recordset.create_filter_clients_recordset,
         msg_type=MessageType.QUERY,
         msg_group="filter_message",
-        recordset_factory_args=(use_case, node_dataset_map),
+        recordset_factory_args=(use_case,),
     )
 
     mock_filter_clients.assert_called_once_with(mock_flow.return_value)
 
 
 def test_prepare_data(driver, node_ids):
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
+    with patch.object(requires, "execution_flow") as mock_flow:
         requires.prepare_data(driver, node_ids)
 
     mock_flow.assert_called_once_with(
@@ -106,38 +95,44 @@ def test_prepare_data(driver, node_ids):
         recordset_factory=interfaces.recordset.create_prepare_data_recordset,
         msg_type=MessageType.QUERY,
         msg_group="prepare_data",
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
 
 
 def test_load_data(driver, node_ids, use_case):
-    node_dataset_map = {"HULAFE": ["synthema-catalogue/aml/hulafe.csv"]}
     with (
         patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
+        patch.object(requires, "DataCatalogueClient") as client_class,
+        patch.object(requires, "DATA_CATALOGUE_URL", "http://catalogue"),
+        patch.object(requires, "DATA_CATALOGUE_TOKEN", "token"),
     ):
-        requires.load_data(driver, node_ids, use_case, node_dataset_map)
+        client_class.return_value.get_use_case_datasets.return_value = {"NODE1": ["dataset.csv"]}
+        client_class.return_value.get_use_case_metadata.return_value = ("meta", "evaluation")
+        requires.load_data(driver, node_ids, use_case)
 
+    kwargs = mock_flow.call_args.kwargs
     mock_flow.assert_called_once_with(
         driver=driver,
         node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_load_data_recordset,
         msg_type=MessageType.QUERY,
         msg_group="load_data",
-        recordset_factory_args=(use_case, node_dataset_map),
+        per_node_recordset_factory=kwargs["per_node_recordset_factory"],
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
-
+    recordset = kwargs["per_node_recordset_factory"](1)
+    assert interfaces.recordset.read_load_data_recordset(recordset) == (
+        use_case,
+        ["dataset.csv"],
+        "meta",
+        "evaluation",
+    )
 
 
 def test_load_model(driver, node_ids):
     model_name = "model_name"
     model_version = 1
 
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
+    with patch.object(requires, "execution_flow") as mock_flow:
         requires.load_model(driver, node_ids, model_name, model_version)
 
     mock_flow.assert_called_once_with(
@@ -146,8 +141,8 @@ def test_load_model(driver, node_ids):
         recordset_factory=interfaces.recordset.create_load_model_recordset,
         msg_type=MessageType.QUERY,
         msg_group="load_model",
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
 
 
 def test_upload_model(driver, node_ids):
@@ -160,10 +155,7 @@ def test_upload_model(driver, node_ids):
 
     pr = ParametersRecord({"param1": MagicMock(Array)})
 
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
+    with patch.object(requires, "execution_flow") as mock_flow:
         requires.upload_model(driver, node_ids, pr)
 
     mock_flow.assert_called_once_with(
@@ -173,8 +165,8 @@ def test_upload_model(driver, node_ids):
         msg_type=MessageType.QUERY,
         msg_group="upload_model",
         recordset_factory_args=(pr,),
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
 
 
 def test_get_parameters_from_one_node(driver, node_ids):
@@ -198,6 +190,7 @@ def test_get_parameters_from_one_node(driver, node_ids):
         recordset_factory=interfaces.recordset.create_get_parameters_recordset,
         msg_type=MessageType.QUERY,
         msg_group="get_parameters",
+        check_success=True,
     )
 
     assert param_record == message.content.parameters_records["parameters"]
@@ -206,10 +199,7 @@ def test_get_parameters_from_one_node(driver, node_ids):
 def test_set_parameters(driver, node_ids):
     pr = ParametersRecord()
 
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
+    with patch.object(requires, "execution_flow") as mock_flow:
         requires.set_parameters(driver, node_ids, pr)
 
     mock_flow.assert_called_once_with(
@@ -219,8 +209,8 @@ def test_set_parameters(driver, node_ids):
         msg_type=MessageType.QUERY,
         msg_group="set_parameters",
         recordset_factory_args=(pr,),
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
 
 
 def test_set_run_config(driver, node_ids):
@@ -229,10 +219,7 @@ def test_set_run_config(driver, node_ids):
     experiment_id = "experiment_id"
     run_id = "run_id"
 
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
+    with patch.object(requires, "execution_flow") as mock_flow:
         requires.set_run_config(
             driver, node_ids, experiment_id, run_id, model_name, model_version
         )
@@ -243,9 +230,9 @@ def test_set_run_config(driver, node_ids):
         recordset_factory=interfaces.recordset.create_set_run_cfg_recordset,
         msg_type=MessageType.QUERY,
         msg_group="set_run_config",
-        recordset_factory_args=(experiment_id, run_id, model_name, model_version, None),
+        recordset_factory_args=(experiment_id, run_id, model_name, model_version),
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
 
 
 def test_train_model(driver, node_ids):
@@ -253,10 +240,7 @@ def test_train_model(driver, node_ids):
     mr = MetricsRecord()
     current_global_iter = 1
 
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
+    with patch.object(requires, "execution_flow") as mock_flow:
         mock_flow.return_value = [
             Message(
                 MagicMock(),
@@ -276,8 +260,8 @@ def test_train_model(driver, node_ids):
         msg_type=MessageType.TRAIN,
         msg_group="train_model",
         recordset_factory_args=(pr, current_global_iter),
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
 
     assert all_replies == [
         (
@@ -289,10 +273,7 @@ def test_train_model(driver, node_ids):
 
 
 def test_clean_config(driver, node_ids):
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
+    with patch.object(requires, "execution_flow") as mock_flow:
         requires.clean_config(driver, node_ids)
 
     mock_flow.assert_called_once_with(
@@ -301,41 +282,5 @@ def test_clean_config(driver, node_ids):
         recordset_factory=interfaces.recordset.create_clean_config_recordset,
         msg_type=MessageType.QUERY,
         msg_group="clean_config",
+        check_success=True,
     )
-    mock_check.assert_called_once_with(mock_flow.return_value)
-
-
-def test_evaluate_model(driver, node_ids):
-    pr = ParametersRecord()
-    mr = MetricsRecord()
-
-    with (
-        patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.requires_utils, "check_success_clients") as mock_check,
-    ):
-        mock_flow.return_value = [
-            Message(
-                MagicMock(),
-                RecordSet(
-                    metrics_records={"metrics": mr},
-                ),
-            )
-            for _ in range(3)
-        ]
-        all_replies = requires.evaluate_model(driver, node_ids, pr)
-
-    mock_flow.assert_called_once_with(
-        driver=driver,
-        node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_evaluate_recordset,
-        msg_type=MessageType.EVALUATE,
-        msg_group="evaluate_model",
-        recordset_factory_args=(pr,),
-    )
-    mock_check.assert_called_once_with(mock_flow.return_value)
-
-    assert all_replies == [
-        msg.content.metrics_records["metrics"]
-        for msg in mock_flow.return_value
-    ]
-

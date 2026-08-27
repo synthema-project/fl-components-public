@@ -1,13 +1,10 @@
 from flwr.client import ClientApp
 from flwr.common import Context, Message
 import structlog
-from fl_client.config import MLFLOW_URL, NODE_NAME, DATA_PATH
-
-logger = structlog.get_logger()
+from fl_client.config import FL_USE_CASE, MLFLOW_URL, NODE_NAME, DATA_PATH
 from fl_client.interface import (
     clean_config_if,
     filter_clients_if,
-    generate_synthetic_data_if,
     get_parameters_if,
     load_data_if,
     load_model_if,
@@ -23,19 +20,21 @@ from fl_client.interface import (
     train_model_SMPC_if,
     set_smpc_enabled_if,
     set_dp_config_if,
-    evaluate_model_if,
-    validate_synthetic_data_if,
+    generate_synthetic_if,
 )
+from fl_client.interface import generate_synthetic_data_if
+from fl_client.interface import validate_synthetic_pool_if
 
 from interfaces.mlflow_client import setup_mlflow
+
+logger = structlog.get_logger()
 
 global_vars = {
     "data": None,
     "local_learner": None,
     "model": None,
     "model_meta": None,
-    "use_case": None,
-    "assigned_dataset_paths": None,
+    "use_case": FL_USE_CASE,
     "node_name": NODE_NAME,
     "data_path": DATA_PATH,
     "SMPC_enabled": False,
@@ -44,9 +43,7 @@ global_vars = {
     "smpc_client": None,
     "discovered_peers": None,
     "discovered_peers_ids": None,
-    "dp_config": None,
-    "dataset_meta_json": None,
-    "dataset_meta": None,
+    "dp_config": None
 }
 
 setup_mlflow(MLFLOW_URL)
@@ -88,6 +85,10 @@ def query(msg: Message, ctx: Context) -> Message:
 
     elif mode == "upload_model":
         return upload_model_if(msg, global_vars)
+    elif mode == "generate_synthetic_data":
+        return generate_synthetic_data_if(msg, global_vars)
+    elif mode == "validate_synthetic_pool":
+        return validate_synthetic_pool_if(msg, global_vars)
 
     elif mode == "clean_config":
         return clean_config_if(msg)
@@ -100,14 +101,8 @@ def query(msg: Message, ctx: Context) -> Message:
     elif mode == "connect_peers":
         # returns the peers and peer_stubs
         return connect_peers_if(msg, global_vars)
-    #elif mode == "generate_synthetic":
-    #    return generate_synthetic_if(msg, global_vars)
-    elif mode == "generate_synthetic_data":
-        return generate_synthetic_data_if(msg, global_vars)
-
-    elif mode == "validate_synthetic_data":
-        return validate_synthetic_data_if(msg, global_vars)
-
+    elif mode == "generate_synthetic":
+        return generate_synthetic_if(msg, global_vars)
     else:
         raise NotImplementedError(f"Unknown mode: {mode}")
 
@@ -135,6 +130,4 @@ def train(msg: Message, ctx: Context) -> Message:
 
 @app.evaluate()
 def evaluate(msg: Message, ctx: Context) -> Message:
-    global global_vars
-    return evaluate_model_if(msg, global_vars)
-
+    raise NotImplementedError()

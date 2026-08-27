@@ -1,48 +1,53 @@
-import inspect
-import io
 from typing import Any, List, Dict
-
-import grpc
+import inspect
+import json
+import os
 import numpy as np
+import grpc
 import pandas as pd
-import structlog
 from flwr.common import MetricsRecord, ParametersRecord
 import structlog
-from fl_client import smpc_pb2
-from fl_client.SMPCClient import SMPCClient
-from fl_client.utils.minio_loader import download_object, upload_file
-import json
-import tempfile
-import os
+from fl_client.config import DATA_PATH
+from fl_client.config import DATA_PATH_AML
+
 from interfaces import mlflow_client
-from model_store_interface import validation
-from model_store_interface.core.dataset_partition import DatasetPartition
-from model_store_interface import DatasetMeta, UseCase
-
-from fl_client import smpc_pb2
 from fl_client.SMPCClient import SMPCClient
+from fl_client import smpc_pb2
 from fl_client.utils.minio_loader import download_object
+from fl_client.utils.minio_loader import upload_dataframe, upload_json, upload_html, download_object
 
-# Import the strict MLOps partitioning enum
+try:
+    from model_store_interface.core.dataset_partition import DatasetPartition
+    from model_store_interface.metadata.models.dataset_metadata import DatasetMetadata
+    from model_store_interface.metadata.models.model import SynthemaDatasetModel
+except ImportError:  # pragma: no cover - compatibility with legacy images
+    DatasetPartition = None
+    DatasetMetadata = None
+    SynthemaDatasetModel = None
 
 logger = structlog.get_logger()
 
 
-def validate_utility_report(*args, **kwargs):
-    return validation.validate_utility_report(*args, **kwargs)
-
-
-def validate_privacy_report(*args, **kwargs):
-    return validation.validate_privacy_report(*args, **kwargs)
+def _accepts_parameter(callable_obj: Any, parameter_name: str) -> bool:
+    """Return whether a callable can receive the named keyword argument."""
+    try:
+        parameters = inspect.signature(callable_obj).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == parameter_name
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 def set_run_config(
-        experiment_id: str,
-        parent_run_id: str,
-        node_name: str,
-        model_name: str,
-        model_version: int,
-        data_path: str,
+    experiment_id: str,
+    parent_run_id: str,
+    node_name: str,
+    model_name: str,
+    model_version: int,
+    data_path: str,
 ) -> None:
     if mlflow_client.mlflow.active_run():
         mlflow_client.mlflow.end_run("FAILED")
@@ -55,198 +60,123 @@ def set_run_config(
     mlflow_client.set_dataset_signature(node_name, data_path, child_run_id)
 
 
-def _partition_of(path: str):
-    """Map a dataset object path to its partition by filename suffix, else None."""
-    p = path.lower()
-    if p.endswith("_train.csv"):
-        return DatasetPartition.TRAIN
-    if p.endswith("_val.csv"):
-        return DatasetPartition.VAL
-    if p.endswith("_test.csv"):
-        return DatasetPartition.TEST
-    return None
-
-
-def _hydrate_dataset_meta(meta_path: str, global_vars: dict) -> None:
-    """Download and parse the DatasetMeta schema JSON from MinIO into global_vars."""
-    try:
-        local_meta = download_object(meta_path)
-        with open(local_meta, encoding="utf-8") as f:
-            dataset_meta = DatasetMeta.model_validate_json(f.read())
-        if isinstance(dataset_meta.use_case, str):
-            dataset_meta = dataset_meta.model_copy(
-                update={"use_case": UseCase(dataset_meta.use_case)}
-            )
-        global_vars["dataset_meta"] = dataset_meta
-        logger.info(f"Hydrated DatasetMeta schema from MinIO ({meta_path})")
-    except Exception as e:
-        logger.error(f"Failed to hydrate DatasetMeta from MinIO: {e}")
-
-
 def load_data(
-        use_case: str, dataset_paths: list[str], global_vars: dict
-) -> None:
-    """Load this node's datasets and populate the train/val/test partitions.
+    use_case: str,
+    dataset_paths: list[str] | dict,
+    global_vars: dict | None = None,
+    metadata_json: str | None = None,
+    evaluation_config_json: str | None = None,
+):
+    # Keep the old local-simulation call shape (load_data(use_case, vars))
+    # usable while the Flower path supplies catalogue object paths.
+    if global_vars is None and isinstance(dataset_paths, dict):
+        global_vars = dataset_paths
+        if use_case == "iris":
+            dataset_paths = [DATA_PATH]
+        elif use_case == "AML":
+            dataset_paths = [DATA_PATH_AML]
+        else:
+            raise NotImplementedError(f"No local dataset configured for use case '{use_case}'")
 
-    Two shapes are supported:
-
-    * **Pre-split** (from the data-ingestor): the assigned paths include
-      ``*_train.csv`` / ``*_val.csv`` / ``*_test.csv`` and a ``*_meta.json``
-      DatasetMeta schema. Each CSV is loaded straight into its partition and the
-      schema hydrates ``global_vars["dataset_meta"]``.
-    * **Single CSV** (legacy): a plain CSV is concatenated and split 60/20/20
-      client-side (fixed random_state for deterministic splits across nodes).
-    """
+    if global_vars is None:
+        raise TypeError("global_vars is required")
     if not dataset_paths:
         raise ValueError(
             f"No dataset paths received for node {global_vars['node_name']}"
         )
 
-    logger.info(f"Loading real clinical data from {dataset_paths}...")
+    partition_paths = dataset_paths if isinstance(dataset_paths, dict) else {}
+    paths_to_load = (partition_paths.get("train") or partition_paths.get("val") or partition_paths.get("test")) \
+        if partition_paths else dataset_paths
+    if isinstance(paths_to_load, str):
+        paths_to_load = [paths_to_load]
+    dataframes = []
 
-    meta_paths = [p for p in dataset_paths if p.lower().endswith(".json")]
-    data_paths = [p for p in dataset_paths if not p.lower().endswith(".json")]
+    for object_path in paths_to_load:
+        local_file = object_path if object_path.startswith(("/", ".")) else download_object(object_path)
+        df = pd.read_csv(local_file)
+        dataframes.append(df)
 
-    partition_paths: dict = {}
-    plain_csvs: list[str] = []
-    for p in data_paths:
-        part = _partition_of(p)
-        if part is not None:
-            partition_paths[part] = p
+    dataset = pd.concat(dataframes, ignore_index=True)
+
+    global_vars["data"] = dataset
+    global_vars["dataset"] = dataset
+    global_vars["data_partitions"] = {
+        role: pd.read_csv(path if path.startswith(("/", ".")) else download_object(path))
+        for role, path in partition_paths.items() if role != "schema"
+    } if partition_paths else {}
+    global_vars["use_case"] = use_case
+    if metadata_json:
+        if SynthemaDatasetModel is not None and evaluation_config_json:
+            global_vars["model_meta"] = SynthemaDatasetModel.from_json(
+                metadata_json=json.loads(metadata_json),
+                evaluation_configuration_json=json.loads(evaluation_config_json),
+            )
         else:
-            plain_csvs.append(p)
+            metadata_payload = json.loads(metadata_json)
+            global_vars["model_meta"] = (
+                DatasetMetadata.from_health_dcat_json(metadata_payload)
+                if DatasetMetadata is not None else metadata_payload
+            )
 
-    # Hydrate the model's variable schema from MinIO (needed by prepare_data).
-    if meta_paths:
-        _hydrate_dataset_meta(meta_paths[0], global_vars)
-
-    if partition_paths:
-        loaded = {}
-        for part, path in partition_paths.items():
-            loaded[part] = pd.read_csv(download_object(path))
-        for part in (DatasetPartition.TRAIN, DatasetPartition.VAL, DatasetPartition.TEST):
-            global_vars[part] = loaded.get(part, pd.DataFrame())
-        frames = [df for df in loaded.values() if not df.empty]
-        global_vars["data"] = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-        return
-
-    # Legacy fallback: concatenate plain CSVs and split 60/20/20 client-side.
-    if not plain_csvs:
-        raise ValueError(
-            f"No CSV datasets to load for node {global_vars['node_name']}"
-        )
-    dataframes = [pd.read_csv(download_object(p)) for p in plain_csvs]
-    data = pd.concat(dataframes, ignore_index=True)
-
-    shuffled_data = data.sample(frac=1.0, random_state=42).reset_index(drop=True)
-    n_samples = len(shuffled_data)
-    train_end = int(n_samples * 0.6)
-    val_end = int(n_samples * 0.8)
-
-    global_vars[DatasetPartition.TRAIN] = shuffled_data.iloc[:train_end].reset_index(drop=True)
-    global_vars[DatasetPartition.VAL] = shuffled_data.iloc[train_end:val_end].reset_index(drop=True)
-    global_vars[DatasetPartition.TEST] = shuffled_data.iloc[val_end:].reset_index(drop=True)
-
-    # Legacy compatibility for older learners
-    global_vars["data"] = data
-
-
-# def load_data(
-#        use_case: str,
-#        dataset_paths: list[str],
-#        global_vars: dict,
-# ):
-#    if not dataset_paths:
-#        raise ValueError(
-#            f"No dataset paths received for node {global_vars['node_name']}"
-#        )
-
-#    dataframes = []
-
-#    for object_path in dataset_paths:
-# Support partitioned dataset paths of the form "partition:path",
-# e.g. "train:s3://bucket/train.csv". If no partition prefix is
-# provided we keep old behavior and concatenate everything.
-#        if ":" in object_path and not object_path.startswith("s3://"):
-# interpret as partition:path
-#            partition, path = object_path.split(":", 1)
-#            local_file = download_object(path)
-#            df = pd.read_csv(local_file)
-#            # store per-partition in dataset_partitions dict
-#            if "dataset_partitions" not in global_vars:
-#                global_vars["dataset_partitions"] = {}
-#            global_vars["dataset_partitions"][partition] = df
-#        else:
-#            local_file = download_object(object_path)
-#            df = pd.read_csv(local_file)
-#            dataframes.append(df)
-
-# If we collected unlabeled dataframes, concatenate them as the default
-# dataset. Also keep per-partition mapping available in global_vars.
-#    if dataframes:
-#        dataset = pd.concat(dataframes, ignore_index=True)
-#        global_vars["dataset"] = dataset
-#    else:
-#        # If no unlabeled dataframes were provided, try to build a global
-#        # dataset from available partitions (concatenate all partitions).
-#        partitions = global_vars.get("dataset_partitions", {})
-#        if partitions:
-#            global_vars["dataset"] = pd.concat(list(partitions.values()), ignore_index=True)
-#        else:
-#            global_vars["dataset"] = pd.DataFrame()
-#    global_vars["use_case"] = use_case
 
 
 def prepare_data(global_vars: dict) -> None:
-    """Prepares dataset partitions using the local learner."""
     local_learner = global_vars["local_learner"]
-    sig = inspect.signature(local_learner.prepare_data)
-
-    if "partition" in sig.parameters:
-        # Call prepare_data for each partition and save the prepared dataframes
-        for partition in [DatasetPartition.TRAIN, DatasetPartition.VAL, DatasetPartition.TEST]:
-            data = global_vars.get(partition)
-            if data is not None:
-                kwargs = {}
-                if "data" in sig.parameters:
-                    kwargs["data"] = data
-                kwargs["partition"] = partition
-                if "dataset_meta" in sig.parameters:
-                    kwargs["dataset_meta"] = global_vars.get("dataset_meta")
-                prepared = local_learner.prepare_data(**kwargs)
-                global_vars[f"prepared_{partition.value}"] = prepared
+    data = global_vars["data"]
+    dataset_meta = global_vars.get("model_meta")
+    if (
+        dataset_meta is not None
+        and DatasetPartition is not None
+        and _accepts_parameter(local_learner.prepare_data, "dataset_meta")
+    ):
+        prepared = local_learner.prepare_data(
+            data=data,
+            partition=DatasetPartition.TRAIN,
+            dataset_meta=dataset_meta,
+        )
+        if prepared is not None:
+            global_vars["data"] = prepared
     else:
-        # Legacy compatibility - prepare only the train/raw data
-        train_data = global_vars.get(DatasetPartition.TRAIN, global_vars.get("data"))
-        local_learner.prepare_data(train_data)
+        local_learner.prepare_data(data=data)
 
 
 def load_model(
-        global_vars: dict,
+    global_vars: dict,
 ) -> None:
     mlf_model = mlflow_client.load_model()
     global_vars["model"] = mlf_model
-    global_vars["local_learner"] = (
-        mlf_model.unwrap_python_model().create_local_learner()
-    )
+    python_model = mlf_model.unwrap_python_model()
+    if global_vars.get("model_meta") is None and hasattr(python_model, "get_metadata_documents"):
+        try:
+            metadata_json, evaluation_config_json = python_model.get_metadata_documents()
+        except RuntimeError:
+            pass
+        else:
+            if SynthemaDatasetModel is not None:
+                global_vars["model_meta"] = SynthemaDatasetModel.from_json(
+                    metadata_json=metadata_json,
+                    evaluation_configuration_json=evaluation_config_json,
+                )
+    factory = python_model.create_local_learner
+    dataset_meta = global_vars.get("model_meta")
+    if dataset_meta is not None and _accepts_parameter(factory, "dataset_meta"):
+        global_vars["local_learner"] = factory(dataset_meta=dataset_meta)
+    else:
+        global_vars["local_learner"] = factory()
 
 
 def train_model(
-        global_vars: dict,
-        current_global_iter: int,
+    global_vars: dict,
+    current_global_iter: int,
 ) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
-    if hasattr(local_learner, "train_round"):
-        train_data = global_vars.get("prepared_train", global_vars.get(DatasetPartition.TRAIN, global_vars["data"]))
-        metrics = local_learner.train_round(
-            data=train_data,
-            dataset_meta=global_vars.get("dataset_meta")
-        )
-    elif hasattr(local_learner, "train"):
-        metrics = local_learner.train()
+    dataset_meta = global_vars.get("model_meta")
+    train_round = getattr(local_learner, "train_round", None)
+    if dataset_meta is not None and train_round is not None and _accepts_parameter(train_round, "dataset_meta"):
+        metrics = train_round(global_vars["data"], dataset_meta)
     else:
-        raise AttributeError("local_learner has neither 'train_round' nor 'train' method")
-
+        metrics = local_learner.train()
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Unexpected metrics type: {type(metrics)}")
     mlflow_client.log_metrics(metrics, current_global_iter)
@@ -255,26 +185,19 @@ def train_model(
 
 def evaluate_model(global_vars: dict) -> MetricsRecord:
     local_learner = global_vars["local_learner"]
-    if hasattr(local_learner, "evaluate"):
-        sig = inspect.signature(local_learner.evaluate)
-        if len(sig.parameters) == 0:
-            metrics = local_learner.evaluate()
-        else:
-            val_data = global_vars.get("prepared_val", global_vars.get(DatasetPartition.VAL, global_vars["data"]))
-            metrics = local_learner.evaluate(
-                data=val_data,
-                dataset_meta=global_vars.get("dataset_meta")
-            )
+    dataset_meta = global_vars.get("model_meta")
+    evaluate = getattr(local_learner, "evaluate")
+    if dataset_meta is not None and _accepts_parameter(evaluate, "dataset_meta"):
+        metrics = evaluate(global_vars["data"], dataset_meta)
     else:
-        raise AttributeError("local_learner has no 'evaluate' method")
-
+        metrics = evaluate()
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Expected MetricsRecord, got {type(metrics)}")
     return metrics
 
 
 def get_model_parameters(
-        global_vars: dict,
+    global_vars: dict,
 ) -> ParametersRecord:
     local_learner = global_vars["local_learner"]
     parameters = local_learner.get_parameters()
@@ -287,130 +210,107 @@ def set_model_parameters(parameters: ParametersRecord, global_vars: dict) -> Non
     local_learner = global_vars["local_learner"]
     local_learner.set_parameters(parameters)
 
-
-def set_dp_config(dp_params: dict, global_vars: dict):
+def set_dp_config(dp_params:dict, global_vars:dict):
     global_vars["dp_config"] = dp_params
 
 
+
 def upload_model(
-        latest_parameters: ParametersRecord,
-        global_vars: dict,
+    latest_parameters: ParametersRecord,
+    global_vars: dict,
 ) -> dict[str, Any]:
     local_learner = global_vars["local_learner"]
     set_model_parameters(latest_parameters, global_vars)
-    # Task use case (e.g. "AML-1") from the dataset meta, used to tag the trained
-    # model when the base model version carries no use_case tag.
-    use_case = None
-    dataset_meta = global_vars.get("dataset_meta")
-    if dataset_meta is not None and getattr(dataset_meta, "use_case", None) is not None:
-        uc = dataset_meta.use_case
-        use_case = uc.value if hasattr(uc, "value") else str(uc)
     model_info: dict[str, Any] = mlflow_client.upload_final_state(
-        local_learner, use_case=use_case
+        local_learner,
+        dataset_meta=global_vars.get("model_meta"),
     )
     return model_info
 
 
+def generate_synthetic_data(n_samples: int, global_vars: dict) -> dict[str, str]:
+    learner = global_vars["local_learner"]
+    dataset_meta = global_vars.get("model_meta")
+    generator = getattr(learner, "generate_synthetic_data", None)
+    if generator is None or dataset_meta is None:
+        raise RuntimeError("The loaded model does not support metadata-aware synthetic data generation")
+    synthetic_data = generator(n_samples, dataset_meta)
+    object_uri = upload_dataframe(
+        synthetic_data,
+        use_case=global_vars["use_case"],
+        model_name=global_vars.get("model_name", "sdg_model"),
+        node_name=global_vars["node_name"],
+    )
+    metadata_json, evaluation_json = dataset_meta.to_json()
+    return {
+        "object_uri": object_uri,
+        "metadata_uri": upload_json(
+            metadata_json,
+            use_case=global_vars["use_case"],
+            model_name=global_vars.get("model_name", "sdg_model"),
+            node_name=global_vars["node_name"],
+            filename="dataset_meta.json",
+        ),
+        "evaluation_uri": upload_json(
+            evaluation_json,
+            use_case=global_vars["use_case"],
+            model_name=global_vars.get("model_name", "sdg_model"),
+            node_name=global_vars["node_name"],
+            filename="evaluation_config.json",
+        ),
+    }
+
+
+def validate_synthetic_pool(pool_id: str, object_uri: str, use_case: str,
+                            global_vars: dict) -> dict[str, Any]:
+    """Run the configured validator, or a clearly-labelled smoke validator.
+
+    Private AML/SCD packages can later be exposed as ``module:callable`` via
+    VALIDATION_PROVIDER. They receive (real_data, synthetic_data, use_case,
+    dataset_meta) and must return ``(metrics, html)``.
+    """
+    synthetic = pd.read_csv(download_object(object_uri))
+    real = global_vars.get("data_partitions", {}).get("train", global_vars.get("data"))
+    provider = os.getenv("VALIDATION_PROVIDER", "placeholder")
+    if provider != "placeholder":
+        module_name, function_name = provider.split(":", 1)
+        provider_fn = getattr(__import__(module_name, fromlist=[function_name]), function_name)
+        metrics, html = provider_fn(real, synthetic, use_case, global_vars.get("model_meta"))
+    else:
+        common = sorted(set(real.columns) & set(synthetic.columns))
+        metrics = {"provider": "placeholder", "column_overlap": len(common) / max(len(real.columns), 1),
+                   "synthetic_rows": int(len(synthetic)), "real_rows": int(len(real))}
+        html = (f"<html><body><h1>Placeholder validation report</h1>"
+                f"<p>Use case: {use_case}</p><pre>{json.dumps(metrics, indent=2)}</pre>"
+                "<p>Replace VALIDATION_PROVIDER with the private validator.</p></body></html>")
+    report_uri = upload_html(html, use_case=use_case,
+                             model_name=global_vars.get("model_name", "sdg_model"),
+                             node_name=global_vars["node_name"],
+                             filename=f"{pool_id}_{global_vars['node_name']}.html")
+    return {"node_name": global_vars["node_name"], "metrics": metrics, "report_uri": report_uri}
+
 def clean_current_config() -> None:
     mlflow_client.clean_current_config()
-
-
-def generate_synthetic_data(n_samples: int, global_vars: dict) -> str:
-    """Generate synthetic data using the local learner and return it as a CSV string.
-
-    Args:
-        n_samples: Number of synthetic rows to generate.
-        global_vars: Shared node state containing ``local_learner`` and ``dataset_meta``.
-
-    Returns:
-        CSV-encoded string of the synthetic DataFrame.
-
-    Raises:
-        ValueError: If ``dataset_meta`` is not present in ``global_vars``.
-    """
-    dataset_meta = global_vars.get("dataset_meta")
-    if dataset_meta is None:
-        raise ValueError("dataset_meta is not available in global_vars; cannot generate synthetic data")
-
-    local_learner = global_vars["local_learner"]
-    df: pd.DataFrame = local_learner.generate_synthetic_data(n_samples, dataset_meta)
-    return df.to_csv(index=False)
-
-
-def validate_synthetic_data(synthetic_csv: str, global_vars: dict) -> dict[str, str]:
-    """
-    Run utility and privacy validation against the node's TEST partition.
-    Utilises the strictly typed DatasetMeta object to securely route plugins.
-    """
-    logger.info("Initiating Phase 4: Strict DCAT-AP post-training federated validation.")
-
-    # EXTRACT HYDRATED OBJECT: No string parsing required
-    meta: DatasetMeta | None = global_vars.get("dataset_meta")
-
-    if not meta:
-        logger.error("CRITICAL: No hydrated DatasetMeta found in global_vars. Aborting validation.")
-        return {"utility": "", "privacy": ""}
-
-    try:
-        # 1. Parse the incoming generative 'Big Pool' payload
-        synthetic_data = pd.read_csv(io.StringIO(synthetic_csv))
-
-        # 2. Extract the local 20% hold-out real data partition
-        real_data = global_vars[DatasetPartition.TEST]
-
-        logger.info(
-            f"Executing clinical validation plugins for domain {meta.use_case.value} "
-            f"against {len(real_data)} real samples."
-        )
-
-        # 3. Execute DevSecOps validation plugins (aml-u, scd-u, sba-priv)
-        utility_report = validate_utility_report(
-            synthetic_data=synthetic_data,
-            real_data=real_data,
-            dataset_meta=meta,
-            node_id=global_vars["node_name"]
-        )
-
-        privacy_report = validate_privacy_report(
-            synthetic_data=synthetic_data,
-            real_data=real_data,
-            dataset_meta=meta,
-            node_id=global_vars["node_name"]
-        )
-
-        return {
-            "utility": utility_report,
-            "privacy": privacy_report
-        }
-
-    except Exception as e:
-        logger.error(f"Catastrophic failure during synthetic data validation: {e}")
-        return {"utility": "", "privacy": ""}
-
 
 def start_P2P_server(client_id: int, port: int, global_vars: dict) -> SMPCClient:
     smpc_client = SMPCClient(client_id, port)
     global_vars["smpc_client"] = smpc_client
     return smpc_client
 
-
 def set_discovered_peers(discovered_peers: List[str], discovered_peers_ids: List[str], global_vars: dict) -> List[str]:
     global_vars['discovered_peers'] = discovered_peers
     global_vars['discovered_peers_ids'] = discovered_peers_ids
     return discovered_peers
 
-
 def set_SMPC_enabled(SMPC_enabled: bool, global_vars: dict) -> bool:
     global_vars["SMPC_enabled"] = SMPC_enabled
     return SMPC_enabled
-
 
 def connect_peers(discovered_peers, global_vars: dict) -> dict[str, str]:
     smpc_client = global_vars["smpc_client"]
     peer_stubs = smpc_client.connect_to_peers(discovered_peers)
     global_vars["peer_stubs"] = peer_stubs
     return peer_stubs
-
 
 def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
                          peer_stubs: Dict[str, Any],
@@ -462,7 +362,6 @@ def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
         except grpc.RpcError as e:
             logger.error(f"Failed to send shares to peer {node_names[peer_node_name]}: {e}")
 
-
 def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     try:
         # Wait for all shares from other clients
@@ -490,138 +389,3 @@ def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     except TimeoutError as e:
         logger.error(f"Client {smpc_client.client_id} failed to receive all shares: {e}")
         return None
-
-def generate_synthetic_and_upload(global_vars: dict,
-                                  n_samples: int,
-                                  sdg_model_name: str,
-                                  dataset_meta_json: str = "",
-                                  upload_to_s3: bool = True,
-                                  s3_bucket: str = "synthetic-data-for-inference",
-                                  create_s3_bucket_if_missing: bool = False,
-                                  real_data_partition: str = "test") -> dict:
-    """Generate synthetic data using local_learner, run validations and upload artifacts to MinIO.
-
-    Returns a dictionary with uploaded object URIs and local paths.
-    """
-    local_learner = global_vars.get("local_learner")
-    node_name = os.environ.get("NODE_NAME") or global_vars.get("node_name")
-    use_case = global_vars.get("use_case") or "unknown"
-    node_id = node_name
-
-    if local_learner is None:
-        raise RuntimeError("Local learner not initialized on client")
-
-    # Prepare dataset_meta
-    dataset_meta_obj = None
-    try:
-        if dataset_meta_json:
-            # Try to import DatasetMeta from model_store_interface
-            try:
-                from model_store_interface import DatasetMeta
-                dataset_meta_obj = DatasetMeta.model_validate_json(dataset_meta_json)
-            except Exception:
-                # Fallback to plain dict
-                dataset_meta_obj = json.loads(dataset_meta_json)
-        else:
-            # Build a simple metadata inference from local dataset
-            dataset = global_vars.get("dataset")
-            if dataset is None:
-                raise RuntimeError("No local dataset available to infer metadata")
-            # Minimal metadata: title and variables
-            cols = list(dataset.columns)
-            variables = [{"name": c, "type": "numeric"} for c in cols]
-            dataset_meta_obj = {"title": f"inferred_{use_case}", "variables": variables, "use_case": use_case}
-    except Exception as e:
-        raise RuntimeError(f"Failed to prepare dataset_meta: {e}")
-
-    # Generate synthetic data
-    try:
-        synthetic_df = local_learner.generate_synthetic_data(n_samples, dataset_meta_obj)
-    except Exception as e:
-        raise RuntimeError(f"Local learner failed to generate synthetic data: {e}")
-
-    # Validation
-    utility_report_html = None
-    privacy_report_html = None
-    try:
-        from model_store_interface.validation import validate_utility_report, validate_privacy_report
-        # Prefer using a specific real-data partition for validation if available.
-        partitions = global_vars.get("dataset_partitions", {})
-        if real_data_partition and partitions and real_data_partition in partitions:
-            real_data = partitions[real_data_partition]
-        else:
-            real_data = global_vars.get("dataset")
-        # These functions expect DatasetMeta model in many cases; try to pass object or dict
-        utility_report_html = validate_utility_report(synthetic_df, real_data, dataset_meta_obj, node_id)
-        privacy_report_html = validate_privacy_report(synthetic_df, real_data, dataset_meta_obj, node_id)
-    except Exception as e:
-        # If either validation fails, embed the error in the HTML placeholder
-        if utility_report_html is None:
-            utility_report_html = f"<html><body><pre>Utility validation failed: {e}</pre></body></html>"
-        if privacy_report_html is None:
-            privacy_report_html = f"<html><body><pre>Privacy validation failed: {e}</pre></body></html>"
-
-    # Persist artifacts locally
-    tmpdir = tempfile.mkdtemp(prefix="synthetic_")
-    data_fname = os.path.join(tmpdir, "data.csv")
-    meta_fname = os.path.join(tmpdir, "dataset_meta.json")
-    util_fname = os.path.join(tmpdir, "utility_report.html")
-    priv_fname = os.path.join(tmpdir, "privacy_report.html")
-
-    synthetic_df.to_csv(data_fname, index=False)
-
-    # dataset_meta_obj may be pydantic; ensure serializable
-    try:
-        if hasattr(dataset_meta_obj, 'model_dump'):
-            meta_json = dataset_meta_obj.model_dump_json(exclude_none=True)
-        else:
-            meta_json = json.dumps(dataset_meta_obj)
-    except Exception:
-        meta_json = json.dumps(dataset_meta_obj)
-
-    with open(meta_fname, 'w') as f:
-        f.write(meta_json)
-
-    with open(util_fname, 'w') as f:
-        f.write(utility_report_html or "")
-
-    with open(priv_fname, 'w') as f:
-        f.write(privacy_report_html or "")
-
-    result = {
-        "local_paths": {
-            "data": data_fname,
-            "meta": meta_fname,
-            "utility_report": util_fname,
-            "privacy_report": priv_fname,
-        },
-        "node_name": node_name,
-        "s3_uris": {}
-    }
-
-    # Upload to S3/MinIO if requested
-    if upload_to_s3:
-        # Build prefix
-        prefix = f"{use_case}/{sdg_model_name}/{node_name}"
-        data_key = f"{prefix}/data.csv"
-        meta_key = f"{prefix}/dataset_meta.json"
-        util_key = f"{prefix}/utility_report.html"
-        priv_key = f"{prefix}/privacy_report.html"
-
-        try:
-            upload_file(data_fname, s3_bucket, data_key)
-            upload_file(meta_fname, s3_bucket, meta_key)
-            upload_file(util_fname, s3_bucket, util_key)
-            upload_file(priv_fname, s3_bucket, priv_key)
-
-            result["s3_uris"] = {
-                "data": f"s3://{s3_bucket}/{data_key}",
-                "meta": f"s3://{s3_bucket}/{meta_key}",
-                "utility_report": f"s3://{s3_bucket}/{util_key}",
-                "privacy_report": f"s3://{s3_bucket}/{priv_key}",
-            }
-        except Exception as e:
-            # Upload failed, include error in result
-            result["s3_upload_error"] = str(e)
-
-    return result

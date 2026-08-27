@@ -1,6 +1,7 @@
 from random import choice
 import structlog
 from flwr.common import (
+    DEFAULT_TTL,
     MessageType,
     MetricsRecord,
     ParametersRecord,
@@ -8,76 +9,62 @@ from flwr.common import (
 from flwr.server import Driver
 
 from fl_server import stages
+from fl_server.config import DATA_CATALOGUE_TOKEN, DATA_CATALOGUE_URL
+from fl_server.data_catalogue import DataCatalogueClient
 from fl_server.utils import driver_utils, requires_utils
 
 import interfaces.recordset
 logger = structlog.get_logger()
-
 
 def execution_flow(
     driver,
     node_ids,
     msg_type,
     msg_group,
+    check_success=True,
     recordset_factory=None,
     recordset_factory_args=None,
     per_node_recordset_factory=None,
 ):
-    """Pure transport: build messages, send them, and return the replies.
-
-    This function does not interpret the reply payload. Each caller is
-    responsible for validating or extracting its own reply schema:
-
-    * Command messages (``set_run_config``, ``load_model``, ...) reply with a
-      ``success`` acknowledgement and should call
-      ``requires_utils.check_success_clients(replies)``.
-    * Query messages (``filter_clients``, ``get_parameters``, ...) reply with
-      data and should interpret it themselves.
-    """
     messages = []
 
     for node_id in node_ids:
+
+        # NEW LOGIC: per-node factory has priority
         if per_node_recordset_factory is not None:
             recordset = per_node_recordset_factory(node_id)
+
         else:
-            # recordset_factory_args defaults to None; guard so zero-arg
-            # factories (e.g. create_clean_config_recordset) don't hit
-            # "argument after * must be an iterable, not NoneType".
             recordset = recordset_factory(*(recordset_factory_args or ()))
 
-        messages.extend(
-            driver_utils.create_messages(
-                driver=driver,
-                dst_node_id=[node_id],
-                content=recordset,
-                message_type=msg_type,
-                group_id=msg_group,
-            )
+        message = driver.create_message(
+            content=recordset,
+            message_type=msg_type,
+            dst_node_id=node_id,
+            group_id=msg_group,
+            ttl=DEFAULT_TTL,
         )
+
+        messages.append(message)
 
     message_ids = driver_utils.send_messages(driver, messages)
 
     replies = driver_utils.wait_messages(driver, message_ids)
 
+    if check_success:
+        requires_utils.check_success_clients(replies)
+
     return replies
 
 
-def filter_clients(
-    driver: Driver,
-    node_ids: list[int],
-    use_case: str,
-    node_dataset_map: dict[str, list[str]],
-) -> list[int]:
-    # The node -> dataset map is resolved from the catalogue by the REST API at
-    # task-creation time and travels inside the task (see schemas.task). The server
-    # just broadcasts it; each client self-selects by NODE_NAME.
+def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[int]:
     all_replies = execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_filter_clients_recordset,
         msg_type=MessageType.QUERY,
         msg_group="filter_message",
-        recordset_factory_args=(use_case, node_dataset_map),
+        recordset_factory_args=(use_case,),
     )
     filtered_node_ids = stages.filter_clients(all_replies)
     return filtered_node_ids
@@ -87,58 +74,136 @@ def load_data(
     driver,
     node_ids: list[int],
     use_case: str,
-    node_dataset_map: dict[str, list[str]],
+    metadata_documents: tuple[str, str] | None = None,
 ):
-    # Broadcast the full catalogue map; each client selects its own datasets by
-    # NODE_NAME. The server cannot map Flower node ids to catalogue node names, so
-    # self-selection on the client is the reliable seam.
-    replies = execution_flow(
+
+    if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
+        raise RuntimeError("DATA_CATALOGUE_URL and DATA_CATALOGUE_TOKEN must be configured to load federated datasets")
+
+    catalogue_client = DataCatalogueClient(base_url=DATA_CATALOGUE_URL, token=DATA_CATALOGUE_TOKEN)
+
+    node_dataset_map = catalogue_client.get_use_case_datasets(use_case)
+    if metadata_documents is None:
+        metadata_json, evaluation_config_json = catalogue_client.get_use_case_metadata(use_case)
+    else:
+        metadata_json, evaluation_config_json = metadata_documents
+
+    def per_node_recordset_factory(node_id: int):
+        node_name = f"NODE{node_id}"
+        dataset_paths = node_dataset_map.get(node_name, [])
+
+        return interfaces.recordset.create_load_data_recordset(
+            use_case,
+            dataset_paths,
+            metadata_json,
+            evaluation_config_json,
+        )
+
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_load_data_recordset,
         msg_type=MessageType.QUERY,
         msg_group="load_data",
-        recordset_factory_args=(use_case, node_dataset_map),
+        per_node_recordset_factory=per_node_recordset_factory,
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 def prepare_data(driver: Driver, node_ids: list[int]) -> None:
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_prepare_data_recordset,
         msg_type=MessageType.QUERY,
         msg_group="prepare_data",
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 
 def load_model(
     driver: Driver, node_ids: list[int], model_name: str, model_version: int
 ) -> None:
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_load_model_recordset,
         msg_type=MessageType.QUERY,
         msg_group="load_model",
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 
 def upload_model(
     driver: Driver, node_ids: list[int], parametersrecord: ParametersRecord
 ) -> None:
     selected_node = [choice(node_ids)]
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=selected_node,
         recordset_factory=interfaces.recordset.create_upload_model_recordset,
         msg_type=MessageType.QUERY,
         msg_group="upload_model",
         recordset_factory_args=(parametersrecord,),
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
+
+
+def generate_synthetic_data(
+    driver: Driver,
+    node_ids: list[int],
+    n_samples: int,
+    use_case: str,
+    model_name: str,
+):
+    selected_node = [choice(node_ids)]
+    replies = execution_flow(
+        driver=driver,
+        node_ids=selected_node,
+        recordset_factory=interfaces.recordset.create_generate_synthetic_data_recordset,
+        msg_type=MessageType.QUERY,
+        msg_group="generate_synthetic_data",
+        recordset_factory_args=(n_samples,),
+        check_success=True,
+    )
+    config = replies[0].content.configs_records["config"]
+    object_uri = config.get("object_uri")
+    node_name = config.get("node_name")
+    metadata_uri = config.get("metadata_uri")
+    evaluation_uri = config.get("evaluation_uri")
+    if not all(isinstance(value, str) for value in (object_uri, node_name, metadata_uri, evaluation_uri)):
+        raise RuntimeError("Synthetic-data response did not contain complete object and metadata URIs")
+    if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
+        raise RuntimeError("DATA_CATALOGUE_TOKEN must be configured to register synthetic data")
+    catalogue_client = DataCatalogueClient(base_url=DATA_CATALOGUE_URL, token=DATA_CATALOGUE_TOKEN)
+    catalogue_result = catalogue_client.register_synthetic_pool(
+        use_case=use_case,
+        model_name=model_name,
+        node_name=node_name,
+        n_samples=n_samples,
+        object_uri=object_uri,
+        metadata_uri=metadata_uri,
+        evaluation_uri=evaluation_uri,
+        token=DATA_CATALOGUE_TOKEN,
+    )
+    pool_id = catalogue_result.get("pool_id")
+    if pool_id:
+        validation_replies = execution_flow(
+            driver=driver,
+            node_ids=node_ids,
+            recordset_factory=interfaces.recordset.create_validate_synthetic_pool_recordset,
+            msg_type=MessageType.QUERY,
+            msg_group=f"validate_pool_{pool_id}",
+            recordset_factory_args=(pool_id, object_uri, use_case),
+            check_success=True,
+        )
+        for reply in validation_replies:
+            payload = reply.content.configs_records["validation"]
+            catalogue_client.register_pool_validation(
+                pool_id=pool_id,
+                node_name=str(payload["node_name"]),
+                metrics=dict(payload.get("metrics", {})),
+                report_uri=str(payload["report_uri"]),
+            )
+    return {"object_uri": object_uri, "catalogue": catalogue_result}
 
 
 def get_parameters_from_one_node(
@@ -150,11 +215,11 @@ def get_parameters_from_one_node(
         recordset_factory=interfaces.recordset.create_get_parameters_recordset,
         msg_type=MessageType.QUERY,
         msg_group="get_parameters",
+        check_success=True,
     )
-    # The get_parameters reply carries a success acknowledgement alongside the
-    # parameters, so validate it before extracting the payload.
-    requires_utils.check_success_clients(all_replies)
     msg = all_replies[0]
+    # Check success
+    requires_utils.check_success_clients(all_replies)
     param_record = msg.content.parameters_records["parameters"]
     if not isinstance(param_record, ParametersRecord):
         raise TypeError(f"Expected ParametersRecord, got {type(param_record)}")
@@ -164,15 +229,15 @@ def get_parameters_from_one_node(
 def set_parameters(
     driver: Driver, node_ids: list[int], parametersrecord: ParametersRecord
 ) -> None:
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_set_parameters_recordset,
         msg_type=MessageType.QUERY,
         msg_group="set_parameters",
         recordset_factory_args=(parametersrecord,),
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 
 def set_run_config(
@@ -182,17 +247,16 @@ def set_run_config(
     run_id: str,
     model_name: str,
     model_version: int,
-    dataset_meta_json: str | None = None,
 ) -> None:
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_set_run_cfg_recordset,
         msg_type=MessageType.QUERY,
         msg_group="set_run_config",
-        recordset_factory_args=(experiment_id, run_id, model_name, model_version, dataset_meta_json),
+        recordset_factory_args=(experiment_id, run_id, model_name, model_version),
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 
 def set_dp_config(
@@ -202,15 +266,15 @@ def set_dp_config(
     noise_multiplier: int,
     clipping_norm: int
 ) -> None:
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_set_dp_cfg_recordset,
         msg_type=MessageType.QUERY,
         msg_group="set_dp_config",
         recordset_factory_args=(dp_mode, clipping_norm,noise_multiplier),
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 
 def train_model(
@@ -226,8 +290,8 @@ def train_model(
         msg_type=MessageType.TRAIN,
         msg_group="train_model",
         recordset_factory_args=(parametersrecord, current_global_iter),
+        check_success=True,
     )
-    requires_utils.check_success_clients(all_replies)
 
     return [
         (
@@ -242,29 +306,29 @@ def set_SMPC_enabled(
     node_ids: list[int],
     smpc_enabled: bool,
 ) -> None:
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_set_smpc_enabled_recordset,
         msg_type=MessageType.QUERY,
         msg_group="set_smpc_enabled",
         recordset_factory_args=(smpc_enabled,),
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 
 def clean_config(
     driver: Driver,
     node_ids: list[int],
 ) -> None:
-    replies = execution_flow(
+    execution_flow(
         driver=driver,
         node_ids=node_ids,
         recordset_factory=interfaces.recordset.create_clean_config_recordset,
         msg_type=MessageType.QUERY,
         msg_group="clean_config",
+        check_success=True,
     )
-    requires_utils.check_success_clients(replies)
 
 ## Require P2P established
 def start_P2P_server(driver: Driver,
@@ -279,8 +343,8 @@ def start_P2P_server(driver: Driver,
         msg_type=MessageType.QUERY,
         msg_group="start_P2P_server",
         recordset_factory_args=(node_ids, port),
+        check_success=True,
     )
-    requires_utils.check_success_clients(all_replies)
 
     return [
         msg.content.configs_records['config']['grpc_port']
@@ -301,8 +365,8 @@ def discover_peers(
         msg_type=MessageType.QUERY,
         msg_group="discover_peers",
         recordset_factory_args=(node_ids, client_port, max_discovery_time),
+        check_success=True,
     )
-    requires_utils.check_success_clients(all_replies)
 
     return [
         msg.content.configs_records['config']['peers']
@@ -326,91 +390,4 @@ def connect_peers(
         )
         all_replies.extend(partial_replies)
 
-    requires_utils.check_success_clients(all_replies)
-
     return [msg.content.configs_records['config']['peers'] for msg in all_replies]
-
-
-def evaluate_model(
-    driver: Driver,
-    node_ids: list[int],
-    parametersrecord: ParametersRecord,
-) -> list[MetricsRecord]:
-    all_replies = execution_flow(
-        driver=driver,
-        node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_evaluate_recordset,
-        msg_type=MessageType.EVALUATE,
-        msg_group="evaluate_model",
-        recordset_factory_args=(parametersrecord,),
-    )
-    requires_utils.check_success_clients(all_replies)
-
-    return [
-        msg.content.metrics_records["metrics"]
-        for msg in all_replies
-    ]
-
-
-def generate_synthetic_data(
-    driver: Driver,
-    node_ids: list[int],
-    n_samples: int,
-) -> dict[int, str]:
-    """Request synthetic data generation from selected nodes.
-
-    Args:
-        driver: Flower driver instance.
-        node_ids: IDs of the nodes to contact.
-        n_samples: Number of synthetic rows to request.
-
-    Returns:
-        Mapping of ``node_id -> synthetic CSV string`` for each node.
-    """
-    all_replies = execution_flow(
-        driver=driver,
-        node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_generate_synthetic_data_recordset,
-        msg_type=MessageType.QUERY,
-        msg_group="generate_synthetic_data",
-        recordset_factory_args=(n_samples,),
-    )
-    requires_utils.check_success_clients(all_replies)
-    return {
-        msg.metadata.src_node_id: msg.content.configs_records["config"]["synthetic_csv"]
-        for msg in all_replies
-    }
-
-
-def validate_synthetic_data(
-    driver: Driver,
-    node_ids: list[int],
-    synthetic_csv: str,
-) -> dict[int, dict[str, str]]:
-    """Broadcast synthetic CSV to all nodes for federated validation.
-
-    Args:
-        driver: Flower driver instance.
-        node_ids: IDs of the nodes to contact.
-        synthetic_csv: CSV string of synthetic data generated on the elected node.
-
-    Returns:
-        Mapping of ``node_id -> {"utility": str, "privacy": str}`` (HTML reports).
-    """
-    all_replies = execution_flow(
-        driver=driver,
-        node_ids=node_ids,
-        recordset_factory=interfaces.recordset.create_validate_synthetic_data_recordset,
-        msg_type=MessageType.QUERY,
-        msg_group="validate_synthetic_data",
-        recordset_factory_args=(synthetic_csv,),
-    )
-    requires_utils.check_success_clients(all_replies)
-    return {
-        msg.metadata.src_node_id: {
-            "utility": msg.content.configs_records["config"]["utility"],
-            "privacy": msg.content.configs_records["config"]["privacy"],
-        }
-        for msg in all_replies
-    }
-

@@ -1,4 +1,3 @@
-import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -10,38 +9,29 @@ from flwr.common import (
     RecordSet,
     MetricsRecord,
 )
-from model_store_interface import DatasetMeta, UseCase, Variable
 
 from fl_client import interface
 
 
 @patch("fl_client.interface.stages.load_data")
 def test_load_data_if_success(load_data_mock):
-    global_vars = {"node_name": "HULAFE"}
-    node_dataset_map = {"HULAFE": ["synthema-catalogue/aml/hulafe.csv"]}
-    configs_records = {
-        "config": ConfigsRecord(
-            {"use_case": "AML-1", "node_dataset_map": json.dumps(node_dataset_map)}
-        )
-    }
+    global_vars = dict()
+    configs_records = {"config": ConfigsRecord({"use_case": "iris"})}
     msg = Message(
         metadata=Mock(spec=Metadata), content=RecordSet(configs_records=configs_records)
     )
 
     rsp = interface.load_data_if(msg, global_vars)
 
-    # The client resolves its own datasets by NODE_NAME from the broadcast map.
-    load_data_mock.assert_called_once_with(
-        "AML-1", ["synthema-catalogue/aml/hulafe.csv"], global_vars
-    )
-    assert global_vars["use_case"] == "AML-1"
+    assert len(global_vars.keys()) == 0
+    assert load_data_mock.called
     assert "config" in rsp.content.configs_records.keys()
     assert rsp.content.configs_records["config"]["success"]
 
 
 @patch("fl_client.interface.stages.load_data")
 def test_load_data_if_error(load_data_mock):
-    global_vars = {"node_name": "HULAFE"}
+    global_vars = dict()
     configs_records = {"config": ConfigsRecord({"use_case": 1})}
     msg = Message(
         metadata=Mock(spec=Metadata), content=RecordSet(configs_records=configs_records)
@@ -103,7 +93,7 @@ def test_upload_model_if():
     )
 
     with patch(
-            "fl_client.interface.stages.upload_model", return_value=model_info
+        "fl_client.interface.stages.upload_model", return_value=model_info
     ) as mock_upload_model:
         rsp = interface.upload_model_if(msg, global_vars)
 
@@ -119,7 +109,7 @@ def test_upload_model_if():
 @patch("fl_client.interface.stages.get_model_parameters")
 @patch("fl_client.interface.stages.set_model_parameters")
 def test_train_model_if_success(
-        set_model_parameters_mock, get_model_parameters_mock, train_model_mock
+    set_model_parameters_mock, get_model_parameters_mock, train_model_mock
 ):
     get_model_parameters_mock.return_value = Mock(ParametersRecord)
     train_model_mock.return_value = Mock(MetricsRecord)
@@ -199,25 +189,11 @@ def test_set_parameters_if(set_model_parameters_mock):
 
 
 @patch("fl_client.interface.stages.set_run_config")
-def test_set_run_config_if_edge_hydration(set_run_config_mock):
-    """Guarantees the Flower gRPC payload hydrates the strict DCAT-AP Pydantic schema."""
+def test_set_run_config_if_success(set_run_config_mock):
     global_vars = dict(
-        node_name="ubuntu-edge-02",
-        data_path="/tmp/data.csv",
+        node_name="node_name",
+        data_path="/path",
     )
-
-    # 1. The Mathematically Robust Payload
-    # Instantiating the object guarantees it conforms strictly to Pydantic validation
-    mock_meta = DatasetMeta(
-        title="Test SCD Dataset",
-        description="Mock validation schema",
-        version="1.0",
-        schema_version="v1",
-        use_case=UseCase.SCD,
-        variables=[Variable(name="HB", type="numeric", description="Hemoglobin", analysis_domain="clinical")]
-    )
-    valid_dcat_json = mock_meta.model_dump_json()
-
     configs_records = {
         "config": ConfigsRecord(
             {
@@ -225,7 +201,6 @@ def test_set_run_config_if_edge_hydration(set_run_config_mock):
                 "run_id": "run_id",
                 "model_name": "model_name",
                 "model_version": 1,
-                "dataset_meta_json": valid_dcat_json,
             }
         ),
     }
@@ -234,13 +209,14 @@ def test_set_run_config_if_edge_hydration(set_run_config_mock):
         content=RecordSet(configs_records=configs_records),
     )
 
-    # 2. Execute the boundary hydration
-    interface.set_run_config_if(msg, global_vars)
+    rsp = interface.set_run_config_if(msg, global_vars)
 
-    # 3. MLOps Verification: Memory is now type-safe
-    meta = global_vars.get("dataset_meta")
-    assert isinstance(meta, DatasetMeta), "Payload was stripped by Pydantic validation exception!"
-    assert meta.use_case.value == "SCD"
+    assert len(global_vars.keys()) == 4
+    assert global_vars["model_name"] == "model_name"
+    assert global_vars["model_version"] == 1
+    assert set_run_config_mock.called
+    assert "success" in rsp.content.configs_records["config"].keys()
+    assert rsp.content.configs_records["config"]["success"]
 
 
 def test_set_run_config_if_error():
@@ -284,34 +260,31 @@ def test_clean_config_if(clean_current_config_mock):
 
 
 def test_filter_clients_if_success():
-    node_dataset_map = {"HULAFE": ["synthema-catalogue/aml/hulafe.csv"]}
+    global_vars = {"use_case": "test"}
     configs_records = {
-        "config": ConfigsRecord(
-            {"use_case": "AML-1", "node_dataset_map": json.dumps(node_dataset_map)}
-        ),
+        "config": ConfigsRecord({"use_case": "test"}),
     }
     msg = Message(
         metadata=Mock(spec=Metadata),
         content=RecordSet(configs_records=configs_records),
     )
 
-    # Node has data for the use case → participates.
-    global_vars = {"node_name": "HULAFE", "use_case": None}
     rsp = interface.filter_clients_if(msg, global_vars)
 
+    assert len(global_vars.keys()) == 1
+    assert "participate" in rsp.content.configs_records["config"].keys()
     assert rsp.content.configs_records["config"]["participate"]
-    assert global_vars["use_case"] == "AML-1"
-    assert global_vars["assigned_dataset_paths"] == ["synthema-catalogue/aml/hulafe.csv"]
 
-    # A node absent from the map declines.
-    global_vars_other = {"node_name": "UNKNOWN", "use_case": None}
-    rsp = interface.filter_clients_if(msg, global_vars_other)
+    # change use_case
+    global_vars["use_case"] = "test2"
+
+    rsp = interface.filter_clients_if(msg, global_vars)
 
     assert not rsp.content.configs_records["config"]["participate"]
 
 
 def test_filter_clients_if_error():
-    global_vars = {"node_name": "HULAFE", "use_case": None}
+    global_vars = {"use_case": "test"}
     configs_records = {
         "config": ConfigsRecord({"use_case": 1}),
     }

@@ -33,6 +33,30 @@ def create_upload_model_response(msg: Message, model_id: str, run_id: int) -> Me
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
 
 
+def create_synthetic_data_response(
+    msg: Message,
+    object_uri: str,
+    node_name: str,
+    metadata_uri: str,
+    evaluation_uri: str,
+) -> Message:
+    configsrecord = ConfigsRecord({
+        "success": True,
+        "object_uri": object_uri,
+        "node_name": node_name,
+        "metadata_uri": metadata_uri,
+        "evaluation_uri": evaluation_uri,
+        "message": "synthetic data uploaded successfully",
+    })
+    return msg.create_reply(content=RecordSet(configs_records={"config": configsrecord}), ttl=DEFAULT_TTL)
+
+
+def create_validation_response(msg: Message, result: dict) -> Message:
+    return msg.create_reply(content=RecordSet(configs_records={
+        "validation": ConfigsRecord(result),
+    }), ttl=DEFAULT_TTL)
+
+
 def create_train_response(
     msg: Message, model_parameters: ParametersRecord, model_metrics: MetricsRecord
 ) -> Message:
@@ -121,31 +145,3 @@ def create_error_response(
     )
     rs = RecordSet(configs_records={"config": configsrecord})
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
-
-def create_generate_synthetic_response(msg: Message, result: dict) -> Message:
-    configsrecord = ConfigsRecord(
-        {
-            "success": True,
-            "message": "synthetic data generation complete",
-            "result": result,
-        }
-    )
-    rs = RecordSet(configs_records={"config": configsrecord})
-    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
-
-
-def create_evaluate_response(
-    msg: Message, model_metrics: MetricsRecord
-) -> Message:
-    configsrecord = ConfigsRecord(
-        {
-            "success": True,
-            "message": "model evaluated successfully",
-        }
-    )
-    rs = RecordSet(
-        metrics_records={"metrics": model_metrics},
-        configs_records={"config": configsrecord},
-    )
-    return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
-
