@@ -10,7 +10,7 @@ model = FederatedModel(model_name="iris_model")
 submit_fl_model(model, "http://mlflow", "username", "password", "Default", "AML", False)
 
 response = requests.post(
-    "http://synthema-fl-restapi:8000/tasks",
+    "http://synthema-fl-restapi:8000/tasks/",
     json={
         "user_id": "1",
         "use_case": "iris",

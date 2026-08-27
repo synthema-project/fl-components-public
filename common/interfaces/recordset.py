@@ -315,3 +315,59 @@ def read_set_smpc_enabled_recordset(recordset: RecordSet) -> bool:
     if not isinstance(smpc_enabled, bool):
         raise TypeError(f"smpc_enabled must be a boolean, received {type(smpc_enabled)}")
     return smpc_enabled
+
+def create_generate_synthetic_recordset(
+    use_case: str,
+    n_samples: int,
+    sdg_model_name: str,
+    dataset_meta_json: str = "",
+    upload_to_s3: bool = True,
+    s3_bucket: str = "synthetic-data-for-inference",
+    create_s3_bucket_if_missing: bool = False,
+    real_data_partition: str = "test",
+) -> RecordSet:
+    """Create a RecordSet instructing clients to generate synthetic data and upload it."""
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "generate_synthetic",
+            "use_case": use_case,
+            "n_samples": n_samples,
+            "sdg_model_name": sdg_model_name,
+            "dataset_meta_json": dataset_meta_json,
+            "real_data_partition": real_data_partition,
+            "upload_to_s3": upload_to_s3,
+            "s3_bucket": s3_bucket,
+            "create_s3_bucket_if_missing": create_s3_bucket_if_missing,
+        }
+    )
+    return RecordSet(configs_records={"config": configsrecord})
+
+
+def read_generate_synthetic_recordset(recordset: RecordSet) -> dict:
+    config = recordset.configs_records["config"]
+    use_case = config.get("use_case")
+    n_samples = config.get("n_samples")
+    sdg_model_name = config.get("sdg_model_name")
+    dataset_meta_json = config.get("dataset_meta_json", "")
+    real_data_partition = config.get("real_data_partition", "test")
+    upload_to_s3 = config.get("upload_to_s3", True)
+    s3_bucket = config.get("s3_bucket", "synthetic-data-for-inference")
+    create_bucket = config.get("create_s3_bucket_if_missing", False)
+
+    if not isinstance(use_case, str):
+        raise TypeError(f"use_case must be a string, received {type(use_case)}")
+    if not isinstance(n_samples, int):
+        raise TypeError(f"n_samples must be an int, received {type(n_samples)}")
+    if not isinstance(sdg_model_name, str):
+        raise TypeError(f"sdg_model_name must be a string, received {type(sdg_model_name)}")
+
+    return {
+        "use_case": use_case,
+        "n_samples": n_samples,
+        "sdg_model_name": sdg_model_name,
+        "dataset_meta_json": dataset_meta_json,
+        "real_data_partition": real_data_partition,
+        "upload_to_s3": upload_to_s3,
+        "s3_bucket": s3_bucket,
+        "create_s3_bucket_if_missing": create_bucket,
+    }

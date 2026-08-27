@@ -11,6 +11,7 @@ from fl_client import stages
 from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
 from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, split_model_parameters_to_shares, numpy_dict_to_torch_state_dict
+from fl_client.utils.responses_utils import create_error_response, create_generate_synthetic_response
 
 logger = structlog.get_logger()
 
@@ -206,3 +207,24 @@ def start_P2P_server_if(msg: Message, global_vars: dict) -> Message:
     )
 
     return responses_utils.create_start_p2p_server_response(msg, config['port'])
+
+def generate_synthetic_if(msg: Message, global_vars: dict) -> Message:
+    try:
+        params = recordset.read_generate_synthetic_recordset(msg.content)
+    except Exception as e:
+        return create_error_response(msg, f"Invalid generate_synthetic recordset: {e}")
+
+    try:
+        result = stages.generate_synthetic_and_upload(
+            global_vars,
+            params["n_samples"],
+            params["sdg_model_name"],
+            params.get("dataset_meta_json", ""),
+            params.get("upload_to_s3", True),
+            params.get("s3_bucket", "synthetic-data"),
+            params.get("create_s3_bucket_if_missing", False),
+            params.get("real_data_partition", "test"),
+        )
+        return create_generate_synthetic_response(msg, result)
+    except Exception as e:
+        return create_error_response(msg, f"Synthetic generation failed: {e}")

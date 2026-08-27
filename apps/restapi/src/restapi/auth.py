@@ -7,6 +7,8 @@ from jwcrypto.jws import InvalidJWSSignature, InvalidJWSObject
 from jwcrypto.jwt import JWTExpired
 from typing import Optional, Annotated
 from fastapi import Depends, HTTPException, status
+from restapi.config import AUTH_DISABLE_TESTS
+
 
 
 KEYCLOAK_SERVER_URL=os.getenv("KEYCLOAK_SERVER_URL", "https://users.k8s.synthema.rid-intrasoft.eu" )
@@ -47,7 +49,7 @@ class UserClaims(BaseModel):
 
         return False
 
-oauth2_scheme = HTTPBearer()
+oauth2_scheme = HTTPBearer(auto_error=False)
 
 public_key= """
 -----BEGIN PUBLIC KEY-----
@@ -66,20 +68,68 @@ def get_user_data_from_token(token: str) -> UserClaims:
     return user_claims
 
 
-async def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depends(oauth2_scheme)]) -> UserClaims:
+def get_mock_user() -> UserClaims:
+    return UserClaims(
+            exp=9999999999,
+            iat=0,
+            jti="test",
+            iss="test",
+            sub="test-user",
+            typ="Bearer",
+            azp="test",
+            session_state="test",
+            scope="openid",
+            sid="test",
+            synthemaRoles=["test:Admin"],
+            given_name="E2E",
+            family_name="Test",
+            preferred_username="e2e-test",
+        )
+
+
+async def get_current_user(
+    credentials: Annotated[
+        Optional[HTTPAuthorizationCredentials],
+        Depends(oauth2_scheme),
+    ],
+) -> UserClaims:
+
+    # E2E auth bypass
+    print("AUTH_DISABLE_TESTS =", AUTH_DISABLE_TESTS)
+    if AUTH_DISABLE_TESTS:
+        print(
+            "AUTH_DISABLE_TESTS detected - bypassing authentication"
+        )
+
+        return get_mock_user()
+
+    # Normal authentication flow
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
+
     try:
         user = get_user_data_from_token(token)
-    except (JWTExpired, InvalidJWSSignature, InvalidJWSObject):
-        print("JWT error:", e)
-        user = None
 
-    if not user:
+    except (
+        JWTExpired,
+        InvalidJWSSignature,
+        InvalidJWSObject,
+    ) as e:
+
+        logger.error("JWT validation error: %s", str(e))
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     return user
 
 

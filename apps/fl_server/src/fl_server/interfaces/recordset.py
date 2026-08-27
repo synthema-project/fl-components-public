@@ -13,11 +13,12 @@ def read_filter_clients_recordset(recordset: RecordSet) -> str:
     return use_case
 
 
-def create_load_data_recordset(use_case: str) -> RecordSet:
+def create_load_data_recordset(use_case: str, dataset_paths: list[str]) -> RecordSet:
     configsrecord = ConfigsRecord(
         {
             "mode": "load_data",
             "use_case": use_case,
+            "dataset_paths": dataset_paths,
         }
     )
     return RecordSet(
@@ -25,11 +26,14 @@ def create_load_data_recordset(use_case: str) -> RecordSet:
     )
 
 
-def read_load_data_recordset(recordset: RecordSet) -> str:
+def read_load_data_recordset(recordset: RecordSet) -> tuple[str, list[str]]:
     use_case = recordset.configs_records["config"]["use_case"]
+    dataset_paths = recordset.configs_records["config"]["dataset_paths"]
     if not isinstance(use_case, str):
         raise TypeError(f"use_case must be a string, received {type(use_case)}")
-    return use_case
+    if not isinstance(dataset_paths, list):
+        raise TypeError(f"dataset_paths must be a list, received {type(dataset_paths)}")
+    return use_case, dataset_paths
 
 
 def create_prepare_data_recordset() -> RecordSet:
@@ -170,3 +174,59 @@ def create_clean_config_recordset() -> RecordSet:
         }
     )
     return RecordSet(configs_records={"config": configsrecord})
+
+
+def create_generate_synthetic_recordset(
+    use_case: str,
+    n_samples: int,
+    sdg_model_name: str,
+    dataset_meta_json: str = "",
+    upload_to_s3: bool = True,
+    s3_bucket: str = "synthetic-data-for-inference",
+    create_s3_bucket_if_missing: bool = False,
+    real_data_partition: str = "test",
+) -> RecordSet:
+    configsrecord = ConfigsRecord(
+        {
+            "mode": "generate_synthetic",
+            "use_case": use_case,
+            "n_samples": n_samples,
+            "sdg_model_name": sdg_model_name,
+            "dataset_meta_json": dataset_meta_json,
+            "real_data_partition": real_data_partition,
+            "upload_to_s3": upload_to_s3,
+            "s3_bucket": s3_bucket,
+            "create_s3_bucket_if_missing": create_s3_bucket_if_missing,
+        }
+    )
+    return RecordSet(configs_records={"config": configsrecord})
+
+
+def read_generate_synthetic_recordset(recordset: RecordSet) -> dict:
+    config = recordset.configs_records["config"]
+    use_case = config.get("use_case")
+    n_samples = config.get("n_samples")
+    sdg_model_name = config.get("sdg_model_name")
+    dataset_meta_json = config.get("dataset_meta_json", "")
+    real_data_partition = config.get("real_data_partition", "test")
+    upload_to_s3 = config.get("upload_to_s3", True)
+    s3_bucket = config.get("s3_bucket", "synthetic-data-for-inference")
+    create_bucket = config.get("create_s3_bucket_if_missing", False)
+
+    if not isinstance(use_case, str):
+        raise TypeError(f"use_case must be a string, received {type(use_case)}")
+    if not isinstance(n_samples, int):
+        raise TypeError(f"n_samples must be an int, received {type(n_samples)}")
+    if not isinstance(sdg_model_name, str):
+        raise TypeError(f"sdg_model_name must be a string, received {type(sdg_model_name)}")
+
+    return {
+        "use_case": use_case,
+        "n_samples": n_samples,
+        "sdg_model_name": sdg_model_name,
+        "dataset_meta_json": dataset_meta_json,
+        "real_data_partition": real_data_partition,
+        "upload_to_s3": upload_to_s3,
+        "s3_bucket": s3_bucket,
+        "create_s3_bucket_if_missing": create_bucket,
+    }

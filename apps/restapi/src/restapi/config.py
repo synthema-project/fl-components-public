@@ -43,5 +43,12 @@ FL_NODES = os.getenv("FL_NODES", "") # IDS []?
 DATA_CATALOGUE_URL = os.getenv("DATA_CATALOGUE_URL", "")
 
 
+# Tests auth disabler
+try:
+    AUTH_DISABLE_TESTS = os.getenv("AUTH_DISABLE_TESTS", False)
+    print("AUTH_DISABLE_TESTS: "+AUTH_DISABLE_TESTS)
+
+except ValueError as e:
+    print(e)
 # Global object for shared runtime config
 obj: dict[str, Any] = {}

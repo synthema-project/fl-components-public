@@ -19,7 +19,8 @@ from fl_client.interface import (
     start_P2P_server_if,
     train_model_SMPC_if,
     set_smpc_enabled_if,
-    set_dp_config_if
+    set_dp_config_if,
+    generate_synthetic_if,
 )
 from fl_client.interface import generate_synthetic_data_if
 from fl_client.interface import validate_synthetic_pool_if
@@ -100,6 +101,8 @@ def query(msg: Message, ctx: Context) -> Message:
     elif mode == "connect_peers":
         # returns the peers and peer_stubs
         return connect_peers_if(msg, global_vars)
+    elif mode == "generate_synthetic":
+        return generate_synthetic_if(msg, global_vars)
     else:
         raise NotImplementedError(f"Unknown mode: {mode}")
 

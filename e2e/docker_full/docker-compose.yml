@@ -27,10 +27,12 @@ services:
           cpus: "1"
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow
+    image: ghcr.io/mlflow/mlflow:v3.10.1
     container_name: mlflow
     ports:
       - 10000:80
+    environment:
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,localhost,127.0.0.1"
     command: ["mlflow", "server", "--host", "0.0.0.0", "--port", "80", 
             "--serve-artifacts", "--artifacts-destination", "file:///artifacts",
             "--backend-store-uri", "sqlite:///store.db"]
@@ -42,6 +44,7 @@ services:
 
   synthema-fl-client:
     image: synthema-fl-client:test
+    pull_policy: never  # use the image built in the prior pipeline step; never pull from a registry
     container_name: synthema-fl-client
     command: ["flower-client-app", "--superlink", "flower-superlink:9092", "--insecure", "src.fl_client.main:app"]
     depends_on:
@@ -58,6 +61,7 @@ services:
   
   synthema-fl-server:
     image: synthema-fl-server:test
+    pull_policy: never  # use the image built in the prior pipeline step; never pull from a registry
     ports:
       - 9091:9091 # FL server port
     container_name: synthema-fl-server
@@ -82,6 +86,7 @@ services:
 
   synthema-fl-status_listener:
     image: synthema-fl-status_listener:test
+    pull_policy: never  # use the image built in the prior pipeline step; never pull from a registry
     container_name: synthema-fl-status_listener
     environment:
       - RABBIT_USERNAME=username
@@ -105,6 +110,7 @@ services:
 
   synthema-fl-restapi:
     image: synthema-fl-restapi:test
+    pull_policy: never  # use the image built in the prior pipeline step; never pull from a registry
     container_name: synthema-fl-restapi
     environment:
       - RABBIT_USERNAME=username
@@ -118,6 +124,15 @@ services:
       - POSTGRES_PORT=5432
       - DB_ECHO=true
       - DB_MODE=postgresql
+      - KEYCLOAK_SERVER_URL=http://users.k8s.synthema.rid-intrasoft.eu/
+      - KEYCLOAK_CLIENT_ID=synthema
+      - KEYCLOAK_REALM_NAME=Synthema
+      - MLFLOW_BASE_URL=http://mlflow
+      - MLFLOW_TRACKING_USERNAME=mlflow
+      - MLFLOW_TRACKING_PASSWORD=mlflowpassword
+      - FL_NODES=["node1", "node2"]
+      - DATA_CATALOGUE_URL=http://data-catalogue
+      - AUTH_DISABLE_TESTS=True
     depends_on:
       rabbitmq:
         condition: service_healthy
