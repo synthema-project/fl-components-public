@@ -35,9 +35,8 @@ class TaskBase(SQLModel):
     node_dataset_map_json: Optional[str] = Field(
         default=None,
         description=(
-            "JSON-encoded {node_name: [minio_url, ...]} dataset assignment for this "
-            "task's use_case, resolved from the data catalogue at task-creation time. "
-            "Broadcast to clients so each participates/loads by its NODE_NAME."
+            "Legacy dataset assignment retained for database compatibility. "
+            "The current FL server resolves datasets directly from the catalogue."
         ),
     )
     n_samples_synthetic: Optional[int] = Field(
@@ -65,7 +64,6 @@ class TaskRead(TaskBase, table=True):
 
 
 class TaskCreate(TaskBase):
-    # Request-only: node names the caller chose to include. The restapi filters
-    # the catalogue's node->dataset map to these before persisting the task. Not
-    # a column on TaskRead, so it is never stored nor sent to the fl-server.
+    # Reserved request field; non-empty selections are currently rejected because
+    # the FL server does not consume them.
     selected_nodes: Optional[list[str]] = None

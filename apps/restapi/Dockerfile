@@ -31,4 +31,7 @@ COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY src/ ./src
 COPY tests/ ./tests
 
+# Fail the image build if the deployed ASGI entry point cannot load with auth enabled.
+RUN python tests/test_entrypoint.py
+
 CMD ["uvicorn", "restapi.main:app", "--host", "0.0.0.0", "--port", "8000"]
