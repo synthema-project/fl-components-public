@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, Self
 from sqlmodel import SQLModel, Field, Column, Enum
 from pydantic import BaseModel, model_validator
+from sqlalchemy import JSON
 
 
 class Status(str, enum.Enum):
@@ -22,6 +23,7 @@ class TaskBase(SQLModel):
     user_id: str = Field(nullable=False)
     # dataset_uris: List[str] = Field(default=None, sa_column=Column(ARRAY(String())))
     use_case: str = Field(nullable=False)
+    selected_nodes: Optional[list[str]] = Field(default=None, sa_column=Column(JSON, nullable=True))
     model_name: str = Field(nullable=False)
     model_version: int = Field(nullable=False)
     num_global_iterations: int = Field(nullable=False)
@@ -64,6 +66,11 @@ class TaskRead(TaskBase, table=True):
 
 
 class TaskCreate(TaskBase):
-    # Reserved request field; non-empty selections are currently rejected because
-    # the FL server does not consume them.
-    selected_nodes: Optional[list[str]] = None
+    @model_validator(mode="after")
+    def validate_selected_nodes(self) -> Self:
+        if self.selected_nodes is not None:
+            if not self.selected_nodes or any(not name.strip() for name in self.selected_nodes):
+                raise ValueError("selected_nodes must contain at least one nonblank node name")
+            if len(set(self.selected_nodes)) != len(self.selected_nodes):
+                raise ValueError("selected_nodes must not contain duplicates")
+        return self

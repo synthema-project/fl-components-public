@@ -71,6 +71,7 @@ class DataCatalogueClient:
     def register_synthetic_pool(
         self,
         *,
+        pool_id: str,
         use_case: str,
         model_name: str,
         node_name: str,
@@ -79,12 +80,16 @@ class DataCatalogueClient:
         metadata_uri: str | None = None,
         evaluation_uri: str | None = None,
         token: str,
+        validation_nodes: list[str] | None = None,
     ) -> dict[str, Any]:
         """Register a generated object in the catalogue approval queue."""
         response = requests.post(
             f"{self.base_url}/synthetic-pools",
             params={"use_case": use_case, "sdg_model_name": model_name},
             json={
+                "pool_id": pool_id,
+                "validation_phase": "awaiting_reports",
+                "validation_nodes": validation_nodes or [],
                 "node_name": node_name,
                 "n_samples": n_samples,
                 "s3_uris": {

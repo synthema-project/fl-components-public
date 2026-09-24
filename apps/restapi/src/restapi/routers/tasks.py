@@ -62,13 +62,6 @@ async def create_task(
     current_user: UserClaims = Depends(require_authentication),
 ) -> TaskRead:
     try:
-        # The FL server resolves datasets and metadata from the catalogue.
-        # It does not yet consume a node selection supplied by the REST API.
-        if task.selected_nodes:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="selected_nodes is not supported by the current FL server workflow",
-            )
         db_task = TaskRead.model_validate(task)
         session.add(db_task)
         await session.commit()

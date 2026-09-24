@@ -60,13 +60,11 @@ async def check():
     assert message['use_case'] == 'AML'
     assert message['node_dataset_map_json'] is None
     task.selected_nodes = ['NODE1']
-    try:
-        await create_task(task, session, {'dispatch': dispatch}, get_mock_user())
-    except HTTPException as error:
-        assert error.status_code == 422
-    else:
-        raise AssertionError('Unsupported node selection was accepted')
-    session.commit.assert_awaited_once()
+    await create_task(task, session, {'dispatch': dispatch}, get_mock_user())
+    message = json.loads(dispatch.publish_message.call_args.args[0])
+    assert message['selected_nodes'] == ['NODE1']
+    assert session.add.call_args.args[0].selected_nodes == ['NODE1']
+    assert session.commit.await_count == 2
 
 asyncio.run(check())
 '''], env=env, capture_output=True, text=True, timeout=30)

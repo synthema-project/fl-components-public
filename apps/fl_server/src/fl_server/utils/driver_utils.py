@@ -31,8 +31,9 @@ def send_messages(driver: Driver, messages: list[Message]) -> list[str]:
     return message_ids
 
 
-def wait_messages(driver: Driver, message_ids: list[str]) -> list[Message]:
+def wait_messages(driver: Driver, message_ids: list[str], timeout: float | None = None) -> list[Message]:
     message_ids = [message_id for message_id in message_ids if message_id != ""]
+    deadline = None if timeout is None else time.monotonic() + timeout
     all_replies: list[Message] = []
     while True:
         replies = list(driver.pull_messages(message_ids=message_ids))
@@ -40,5 +41,7 @@ def wait_messages(driver: Driver, message_ids: list[str]) -> list[Message]:
         all_replies += replies
         if len(all_replies) == len(message_ids):
             break
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("Timed out waiting for client cleanup replies")
         time.sleep(3)
     return all_replies

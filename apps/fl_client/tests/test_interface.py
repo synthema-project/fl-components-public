@@ -260,7 +260,7 @@ def test_clean_config_if(clean_current_config_mock):
 
 
 def test_filter_clients_if_success():
-    global_vars = {"use_case": "test"}
+    global_vars = {"use_case": "test", "node_name": "ICH"}
     configs_records = {
         "config": ConfigsRecord({"use_case": "test"}),
     }
@@ -271,9 +271,11 @@ def test_filter_clients_if_success():
 
     rsp = interface.filter_clients_if(msg, global_vars)
 
-    assert len(global_vars.keys()) == 1
+    assert len(global_vars.keys()) == 2
     assert "participate" in rsp.content.configs_records["config"].keys()
     assert rsp.content.configs_records["config"]["participate"]
+    assert rsp.content.configs_records["config"]["node_name"] == "ICH"
+    assert rsp.content.configs_records["config"]["success"]
 
     # change use_case
     global_vars["use_case"] = "test2"
@@ -284,7 +286,7 @@ def test_filter_clients_if_success():
 
 
 def test_filter_clients_if_error():
-    global_vars = {"use_case": "test"}
+    global_vars = {"use_case": "test", "node_name": "ICH"}
     configs_records = {
         "config": ConfigsRecord({"use_case": 1}),
     }

@@ -83,7 +83,7 @@ async def test_load_model_and_data(task, driver, node_ids):
 
         mock_load_model.assert_called_once()
         mock_load_data.assert_called_once_with(
-            driver, node_ids, task.use_case, config.global_vars.get("metadata_documents")
+            driver, node_ids, task.use_case, config.global_vars.get("metadata_documents"), node_names=None
         )
         mock_load_model_driver.assert_called_once_with(
             driver, node_ids, task.model_name, task.model_version
@@ -100,19 +100,16 @@ async def test_execute_training_loop(driver, node_ids, parameters):
         patch("fl_server.app.stages.aggregate_metrics") as mock_aggregate_metrics,
         patch("fl_server.app.mlflow_client.log_metrics") as mock_log_metrics,
         patch("fl_server.app.requires.set_parameters") as mock_set_params,
-        patch("fl_server.app.requires.evaluate_model") as mock_evaluate,
     ):
         mock_train.return_value = [(parameters, {}) for _ in range(n_global_iter)]
         mock_aggregate_params.return_value = parameters
-        mock_evaluate.return_value = []
         mock_aggregate_metrics.return_value = MetricsRecord({"accuracy": 0.9})
 
-        await execute_training_loop(driver, node_ids, parameters, n_global_iter)
+        assert await execute_training_loop(driver, node_ids, parameters, n_global_iter) is parameters
 
         assert mock_train.call_count == n_global_iter
         assert mock_aggregate_params.call_count == n_global_iter
-        assert mock_evaluate.call_count == n_global_iter
-        assert mock_log_metrics.call_count == n_global_iter * 2
+        assert mock_log_metrics.call_count == n_global_iter
         assert mock_set_params.call_count == n_global_iter
 
 
@@ -143,6 +140,7 @@ async def test_federated_server_app(task, driver, node_ids, parameters):
         patch(
             "fl_server.app.requires.upload_model", autospec=True
         ) as mock_upload_model,
+        patch("fl_server.app.requires.generate_synthetic_data", autospec=True) as mock_generate,
         patch(
             "fl_server.app.mlflow_client.clean_current_config", autospec=True
         ) as mock_clean_mlflow,
@@ -155,6 +153,7 @@ async def test_federated_server_app(task, driver, node_ids, parameters):
     ):
         mock_filter_clients.return_value = filtered_node_ids
         mock_get_parameters.return_value = parameters
+        mock_training_loop.return_value = parameters
 
         rabbitmq = AsyncMock()
         rabbitmq.publish_message = AsyncMock()
@@ -164,18 +163,11 @@ async def test_federated_server_app(task, driver, node_ids, parameters):
         assert hasattr(app, "_main"), "FederatedServerApp must define `_main`"
         assert callable(app._main), "FederatedServerApp._main should be callable"
 
-        app._main(driver, context)  # Start the task
+        await asyncio.to_thread(app._main, driver, context)
 
-        # ✅ Retrieve the running task and wait for it to complete
-        loop = asyncio.get_event_loop()
-        tasks = [t for t in asyncio.all_tasks(loop) if "server_main" in str(t)]
-
-        for running_task in tasks:
-            await running_task
-
-        mock_filter_clients.assert_called_once_with(driver, node_ids, task.use_case)
+        mock_filter_clients.assert_called_once_with(driver, node_ids, task.use_case, task.selected_nodes, {})
         mock_mlflow_config.assert_called_once_with(task, driver, filtered_node_ids)
-        mock_model_and_data.assert_called_once_with(task, driver, filtered_node_ids)
+        mock_model_and_data.assert_called_once_with(task, driver, filtered_node_ids, {})
         mock_get_parameters.assert_called_once_with(driver, filtered_node_ids)
         mock_set_parameters.assert_called_once()
         mock_training_loop.assert_called_once_with(
@@ -184,3 +176,7 @@ async def test_federated_server_app(task, driver, node_ids, parameters):
         mock_upload_model.assert_called_once_with(driver, filtered_node_ids, parameters)
         mock_clean_mlflow.assert_called_once()
         mock_clean_config.assert_called_once_with(driver, filtered_node_ids)
+        mock_generate.assert_called_once_with(
+            driver, filtered_node_ids, task.num_synthetic_samples, task.use_case, task.model_name,
+            node_names={}
+        )

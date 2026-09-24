@@ -1,3 +1,4 @@
+import json
 from flwr.common import ConfigsRecord, ParametersRecord, RecordSet
 
 
@@ -24,7 +25,7 @@ def create_load_data_recordset(
         {
             "mode": "load_data",
             "use_case": use_case,
-            "dataset_paths": dataset_paths,
+            "dataset_paths": json.dumps(dataset_paths) if isinstance(dataset_paths, dict) else dataset_paths,
             "metadata_json": metadata_json or "",
             "evaluation_config_json": evaluation_config_json or "",
         }
@@ -40,6 +41,8 @@ def read_load_data_recordset(recordset: RecordSet) -> tuple[str, list[str] | dic
 
     use_case = config["use_case"]
     dataset_paths = config.get("dataset_paths", [])
+    if isinstance(dataset_paths, str):
+        dataset_paths = json.loads(dataset_paths)
     metadata_json = config.get("metadata_json", "")
     evaluation_config_json = config.get("evaluation_config_json", "")
 
@@ -93,10 +96,11 @@ def read_upload_model_recordset(recordset: RecordSet) -> ParametersRecord:
     return recordset.parameters_records["parameters"]
 
 
-def create_generate_synthetic_data_recordset(n_samples: int) -> RecordSet:
+def create_generate_synthetic_data_recordset(n_samples: int, pool_id: str) -> RecordSet:
     return RecordSet(configs_records={"config": ConfigsRecord({
         "mode": "generate_synthetic_data",
         "n_samples": n_samples,
+        "pool_id": pool_id,
     })})
 
 
@@ -261,10 +265,11 @@ def read_train_model_recordset(recordset: RecordSet) -> tuple[ParametersRecord, 
     return parameters, current_global_iter
 
 
-def create_clean_config_recordset() -> RecordSet:
+def create_clean_config_recordset(status: str = "FINISHED") -> RecordSet:
     configsrecord = ConfigsRecord(
         {
             "mode": "clean_config",
+            "status": status,
         }
     )
     return RecordSet(configs_records={"config": configsrecord})

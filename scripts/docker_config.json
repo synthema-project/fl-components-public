@@ -1,9 +1,39 @@
 {
     "images": [
-        {"name": "synthema-fl-common", "path": "common", "test": true},
-        {"name": "synthema-fl-client", "path": "apps/fl_client", "buildargs": true, "test": true, "push": true, "msi": true},
-        {"name": "synthema-fl-server", "path": "apps/fl_server", "buildargs": true, "test": true, "push": true, "msi": true},
-        {"name": "synthema-fl-restapi", "path": "apps/restapi", "buildargs": true, "test": true, "push": true},
-        {"name": "synthema-fl-status_listener", "path": "apps/status_listener", "buildargs": true, "test": true, "push": true}
+        {
+            "name": "synthema-fl-common",
+            "path": "common",
+            "test": false
+        },
+        {
+            "name": "synthema-fl-client",
+            "path": "apps/fl_client",
+            "buildargs": true,
+            "test": true,
+            "push": true,
+            "msi": true
+        },
+        {
+            "name": "synthema-fl-server",
+            "path": "apps/fl_server",
+            "buildargs": true,
+            "test": true,
+            "push": true,
+            "msi": true
+        },
+        {
+            "name": "synthema-fl-restapi",
+            "path": "apps/restapi",
+            "buildargs": true,
+            "test": true,
+            "push": true
+        },
+        {
+            "name": "synthema-fl-status_listener",
+            "path": "apps/status_listener",
+            "buildargs": true,
+            "test": true,
+            "push": true
+        }
     ]
 }

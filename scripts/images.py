@@ -74,6 +74,7 @@ def parse_args():
     parser.add_argument(
         "--tag", type=str, help="Tag for the images (or tag to remove)."
     )
+    parser.add_argument("--validation-profile", choices=["none", "aml", "scd"], default="none")
     parser.add_argument(
         "--registry", type=str, help="Registry prefix (required for push)."
     )
@@ -126,21 +127,14 @@ def prepare_msi_wheel(root_dir, context_path):
     repo, so we build its wheel and copy it into ``<context>/wheels/`` where the
     Dockerfile installs it via ``UV_FIND_LINKS`` during ``uv sync``.
     """
+    if os.getenv("MSI_WHEELS_PREPARED") == "1":
+        # Release CI has already inspected and staged exact wheel artifacts.
+        return len(list((context_path / "wheels").glob("model_store_interface-*.whl"))) == 1
     interface_dir = (root_dir.parent / MSI_DIRNAME).resolve()
     wheels_dir = context_path / "wheels"
-    existing = list(wheels_dir.glob("model_store_interface-*.whl")) if wheels_dir.exists() else []
 
     if not interface_dir.exists():
-        # CI / checkout without the sibling repo: fall back to a wheel already vendored
-        # in the build context (e.g. committed under apps/<app>/wheels/).
-        if existing:
-            print(f"[INFO] {MSI_DIRNAME} not found at {interface_dir}; "
-                  f"using pre-vendored wheel(s) in {wheels_dir}")
-            return True
-        print(f"[ERROR] {MSI_DIRNAME} repo not found at {interface_dir} and no pre-vendored "
-              f"wheel in {wheels_dir}.")
-        print("[ERROR] Provide the wheel in the build context's wheels/ dir, configure a "
-              "package index, or check out the repo as a sibling of the fl-components root.")
+        print("[ERROR] MSI source checkout is missing. Build verified source wheels first; deprecated vendored wheels are not a fallback.")
         return False
 
     print("[INFO] Building model-store-interface wheel...")
@@ -186,6 +180,9 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
     if base_image:
         build_args["BASE_IMAGE"] = base_image
 
+    if image_def["name"] == "synthema-fl-client":
+        build_args["VALIDATION_PROFILE"] = os.getenv("VALIDATION_PROFILE", "none")
+
     cmd = ["docker", "build", "--rm", "--platform", "linux/amd64", "-t", full_tag]
     for key, value in build_args.items():
         cmd += ["--build-arg", f"{key}={value}"]
@@ -214,8 +211,10 @@ def tag_image(client, config, old_tag, new_tag):
             print(f"[OK] Tagged {old} as {new}")
         except ImageNotFound:
             print(f"[ERROR] Image not found: {old}")
+            raise
         except APIError as e:
             print(f"[ERROR] Failed to tag image {old}: {e}")
+            raise
 
 
 def untag_image(client, config, tag):
@@ -256,14 +255,15 @@ def push_images(client: docker.DockerClient, config, tag, registry):
                 repository=full_tag, stream=True, decode=True
             ):
                 if "error" in line:
-                    print(f"[ERROR] Push error: {line['error']}")
-                    return
+                    raise RuntimeError(f"Push failed for {full_tag}")
 
             print(f"[OK] Successfully pushed {full_tag}")
         except ImageNotFound:
             print(f"[ERROR] Local image not found: {local_tag}")
+            raise
         except APIError as e:
             print(f"[ERROR] API error during push for {full_tag}: {e}")
+            raise
 
 
 def test_images(client: docker.DockerClient, config, tag):
@@ -289,10 +289,13 @@ def test_images(client: docker.DockerClient, config, tag):
                 print(f"[OK] Tests passed for image: {full_tag}")
             except ImageNotFound:
                 print(f"[ERROR] Local image not found for testing: {full_tag}")
+                raise
             except APIError as e:
                 print(f"[ERROR] API error during testing for {full_tag}: {e}")
+                raise
             except Exception as e:
                 print(f"[ERROR] Unexpected error during testing for {full_tag}: {e}")
+                raise
 
 
 # ------------------------------------------------------------------------------
@@ -341,6 +344,9 @@ def handle_remove(client, config):
 # ------------------------------------------------------------------------------
 def main():
     args = parse_args()
+    if args.validation_profile == "scd":
+        raise SystemExit("SCD reporting is not implemented; select aml or none")
+    os.environ["VALIDATION_PROFILE"] = args.validation_profile
     config_file = Path(__file__).resolve().parent / "docker_config.json"
     config = load_config(config_file)
     root_dir = config_file.parent.parent

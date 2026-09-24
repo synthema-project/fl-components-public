@@ -106,3 +106,51 @@ def upload_file(local_path: str, bucket_name: str, object_name: str) -> None:
         # If cannot create bucket, assume it exists or raise later
         pass
     client.fput_object(bucket_name, object_name, local_path)
+
+
+def publish_pending_pool(data: DataFrame, metadata: dict, evaluation: dict, *,
+                         use_case: str, pool_id: str) -> dict[str, str]:
+    """Publish an immutable pool using the storage-interface object contract."""
+    from uuid import UUID
+    from minio.commonconfig import Tags
+
+    if use_case not in {"AML", "SCD"}:
+        raise ValueError("Synthetic pools require an AML or SCD network")
+    if str(UUID(pool_id)) != pool_id:
+        raise ValueError("Invalid synthetic pool ID")
+    bucket = os.getenv("MINIO_SYNTHETIC_BUCKET", "synthetic-data-for-inference")
+    prefix = f"{use_case}/{pool_id}"
+    client = _get_minio_client()
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+    artifacts = {
+        "dataset_meta.json": (json.dumps(metadata).encode(), "application/json"),
+        "evaluation_config.json": (json.dumps(evaluation).encode(), "application/json"),
+        # Publish CSV last: listing discovers pools by their CSV object.
+        "data.csv": (data.to_csv(index=False).encode(), "text/csv"),
+    }
+    tags = Tags.new_object_tags()
+    tags["validation_status"] = "pending"
+    for filename, (payload, content_type) in artifacts.items():
+        client.put_object(bucket, f"{prefix}/{filename}", io.BytesIO(payload),
+                          length=len(payload), content_type=content_type,
+                          tags=tags if filename == "data.csv" else None)
+    return {
+        "object_uri": f"s3://{bucket}/{prefix}/data.csv",
+        "metadata_uri": f"s3://{bucket}/{prefix}/dataset_meta.json",
+        "evaluation_uri": f"s3://{bucket}/{prefix}/evaluation_config.json",
+    }
+
+
+def upload_pool_utility_report(html: str, *, object_uri: str, pool_id: str, node_name: str) -> str:
+    from uuid import UUID
+    from urllib.parse import quote
+    uri = urlparse(object_uri)
+    parts = uri.path.strip("/").split("/")
+    if uri.scheme != "s3" or len(parts) != 3 or parts[1] != str(UUID(pool_id)) or parts[2] != "data.csv":
+        raise ValueError("Invalid canonical pool URI for utility report")
+    key = f"{parts[0]}/{pool_id}/evaluation_reports/{quote(node_name, safe='')}_utility.html"
+    data = html.encode("utf-8")
+    _get_minio_client().put_object(uri.netloc, key, io.BytesIO(data),
+                                  length=len(data), content_type="text/html")
+    return f"s3://{uri.netloc}/{key}"

@@ -16,10 +16,31 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV UV_FIND_LINKS=/wheels
 
+# Resolve MSI from the exact validated wheel, including a version newer than
+# the compatibility baseline declared in pyproject.toml.
+RUN python -c "from pathlib import Path; import json; w=list(Path('/wheels').glob('model_store_interface-*.whl')); assert len(w)==1; p=Path('pyproject.toml'); p.write_text(p.read_text()+'\n[tool.uv]\noverride-dependencies = '+json.dumps(['model-store-interface @ '+w[0].as_uri()])+'\n')"
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --group dev
 
+# Reporting is intentionally isolated from training dependencies.
+ARG VALIDATION_PROFILE=none
+RUN mkdir -p /opt/aml-utility \
+ && case "$VALIDATION_PROFILE" in \
+      none) ;; \
+      aml) set -- /wheels/model_store_interface-*.whl; uv venv /opt/aml-utility \
+        && uv pip install --python /opt/aml-utility/bin/python \
+          "$1[aml-utility]" /wheels/sd_quality-*.whl \
+          "mlflow-skinny==2.22.5" "numpy==1.26.4" "pandas==2.3.3" \
+          "scikit-learn==1.7.2" "scikit-survival==0.26.0" \
+        && /opt/aml-utility/bin/python -c "from model_store_interface.aml_utility import generate_aml_utility_report; from sd_quality.report.Generate_report import generate_report_from_dataframes_and_info" ;; \
+      *) echo "Unsupported validation profile: $VALIDATION_PROFILE" >&2; exit 1 ;; \
+    esac
+
 FROM ${BASE_IMAGE}:${CURRENT_VERSION} as runtime
+
+ARG VALIDATION_PROFILE=none
+ENV VALIDATION_PROFILE=${VALIDATION_PROFILE} MPLBACKEND=Agg
+COPY --from=builder /opt/aml-utility /opt/aml-utility
 
 WORKDIR /app
 
@@ -28,8 +49,7 @@ ENV VIRTUAL_ENV=/app/.venv \
     PYTHONPATH="/common:/app/src"
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-# Install grpcio-tools and protobuf in the runtime container
-RUN pip install grpcio-tools protobuf
+# grpcio-tools/protobuf come from the resolved application environment.
 COPY src/ ./src
 COPY tests/ ./tests
 

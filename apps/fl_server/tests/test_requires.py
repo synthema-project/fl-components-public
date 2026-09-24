@@ -69,7 +69,7 @@ def test_execution_flow(driver, node_ids):
 def test_filter_clients(driver, node_ids, use_case):
     with (
         patch.object(requires, "execution_flow") as mock_flow,
-        patch.object(requires.stages, "filter_clients") as mock_filter_clients,
+        patch.object(requires, "resolve_node_selection") as mock_filter_clients,
     ):
         requires.filter_clients(driver, node_ids, use_case)
 
@@ -80,9 +80,10 @@ def test_filter_clients(driver, node_ids, use_case):
         msg_type=MessageType.QUERY,
         msg_group="filter_message",
         recordset_factory_args=(use_case,),
+        check_success=False,
     )
 
-    mock_filter_clients.assert_called_once_with(mock_flow.return_value)
+    mock_filter_clients.assert_called_once_with(mock_flow.return_value, None)
 
 
 def test_prepare_data(driver, node_ids):
@@ -106,9 +107,9 @@ def test_load_data(driver, node_ids, use_case):
         patch.object(requires, "DATA_CATALOGUE_URL", "http://catalogue"),
         patch.object(requires, "DATA_CATALOGUE_TOKEN", "token"),
     ):
-        client_class.return_value.get_use_case_datasets.return_value = {"NODE1": ["dataset.csv"]}
+        client_class.return_value.get_use_case_datasets.return_value = {f"NODE{i}": ["dataset.csv"] for i in node_ids}
         client_class.return_value.get_use_case_metadata.return_value = ("meta", "evaluation")
-        requires.load_data(driver, node_ids, use_case)
+        requires.load_data(driver, node_ids, use_case, node_names={i: f"NODE{i}" for i in node_ids})
 
     kwargs = mock_flow.call_args.kwargs
     mock_flow.assert_called_once_with(

@@ -189,20 +189,32 @@ def set_current_config(
     _configured.value = True
 
 
-@ensure_bool(_configured)
-def clean_current_config() -> None:
-    """
-    Cleans up the current configuration by finishing the associated MLflow runs.
-
-    If the node is a central node, it updates the parent run and finishes the child run.
-    """
-    global _current_config, _configured
-    # _current_config.clean()
-    if _current_config.is_central_node:
-        _mlflow_client.update_run(str(_current_config.parent_run_id), "FINISHED")
-    mlflow.end_run()
-    _mlflow_client.update_run(str(_current_config.child_run_id), "FINISHED")
-    _configured.value = False
+def clean_current_config(status: str = "FINISHED") -> None:
+    """End runs and release local state, even if tracking is unavailable."""
+    if status not in {"FINISHED", "FAILED"}:
+        raise ValueError(f"Invalid terminal run status: {status}")
+    run_ids = []
+    if _configured.value:
+        run_ids.append(_current_config.child_run_id)
+        if _current_config.is_central_node:
+            run_ids.append(_current_config.parent_run_id)
+    errors = []
+    try:
+        # Also handles a run created before set_current_config failed.
+        try:
+            mlflow.end_run(status=status)
+        except Exception as error:
+            errors.append(error)
+        for run_id in run_ids:
+            if run_id:
+                try:
+                    _mlflow_client.set_terminated(str(run_id), status=status)
+                except Exception as error:
+                    errors.append(error)
+    finally:
+        _configured.value = False
+    if errors:
+        raise errors[0]
 
 
 @ensure_bool(_configured)

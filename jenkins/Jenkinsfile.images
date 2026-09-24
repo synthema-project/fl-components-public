@@ -1,87 +1,95 @@
 pipeline {
-    agent {
-        node {
-            label 'jenkins-dev'
-        }
+    agent { node { label 'jenkins-dev' } }
+    options { disableConcurrentBuilds() }
+    parameters {
+        string(name: 'MSI_REPOSITORY', defaultValue: 'https://github.com/synthema-project/app-model_store-interface.git', description: 'MSI source repository')
+        string(name: 'MSI_BRANCH', defaultValue: '', description: 'Branch to build, e.g. fl-validation-frozen; build its latest pushed version')
+        string(name: 'MSI_GIT_CREDENTIALS', defaultValue: '', description: 'Jenkins Git credential ID, empty for public access')
     }
     environment {
-        DOCKER_REG = "harbor.synthema.rid-intrasoft.eu"
-        DOCKER_REPO = "/fl/"
-        DOCKER_REG_CREDS = "harbor-jenkins-creds"
+        DOCKER_REG = 'harbor.synthema.rid-intrasoft.eu'
+        DOCKER_REPO = '/fl/'
+        MSI_WHEELS_PREPARED = '1'
+        VALIDATION_PROFILE = 'none'
     }
-
     stages {
-        stage("Define version"){
+        stage('Validate inputs') {
             steps {
                 script {
+                    env.FL_SOURCE_BRANCH = env.GIT_BRANCH ?: ''
+                    def branches = [params.MSI_BRANCH]
+                    for (value in branches) {
+                        def branch = value.trim()
+                        if (!branch) { error('Supply a branch for each selected package') }
+                        withEnv(["PACKAGE_BRANCH=${branch}"]) {
+                            sh 'git check-ref-format "refs/heads/$PACKAGE_BRANCH"'
+                        }
+                    }
                     def version = readFile('version').trim()
-                    echo "Version: ${version}"
-                    env.VERSION = "${version}"
+                    if (!(version ==~ /[A-Za-z0-9_][A-Za-z0-9_.-]*/)) { error('Invalid image version') }
+                    env.RELEASE_IMAGE_TAG = "${version}-${env.VALIDATION_PROFILE}"
+                    env.CI_IMAGE_TAG = "ci-${env.BUILD_NUMBER}-${env.VALIDATION_PROFILE}"
                 }
             }
         }
-        // *************************
-        // *** IMAGE BUILD STAGE ***
-        // *************************
-        stage("Build_Images"){
+        stage('Check out package sources') {
             steps {
-                echo "***** Building Image *****"
-                echo "Using version: ${env.VERSION}"
-                // Build the image and push a test tag to the remote repository
-                sh "python3 scripts/images.py --mode build --tag test"
-            }
-        }
+                script {
+                    def fetchSource = { folder, repository, branchInput, credential ->
+                        def branch = branchInput.trim()
+                        dir(folder) {
+                            deleteDir()
+                            def remote = [url: repository]
+                            if (credential?.trim()) { remote.credentialsId = credential.trim() }
+                            remote.refspec = "+refs/heads/${branch}:refs/remotes/origin/${branch}"
+                            checkout([$class: 'GitSCM', branches: [[name: "origin/${branch}"]],
+                                      userRemoteConfigs: [remote], extensions: []])
+                            return sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        }
+                    }
+                    env.MSI_RESOLVED_COMMIT = fetchSource('.ci-sources/msi', params.MSI_REPOSITORY, params.MSI_BRANCH, params.MSI_GIT_CREDENTIALS)
 
-        // *************************
-        // *** TESTS ***
-        // *************************
-        stage("Unit_Tests"){
-            steps{
-                echo "***** Running Unit Tests *****"
-                sh "python3 scripts/images.py --mode test --tag test"
-            }
-        }
-        //stage ("E2E_Tests"){
-        //    steps{
-        //        echo "***** Running E2E Tests *****"
-        //        sh "bash e2e/docker_full/run.sh"
-        //    }
-        //}
-        // *******************************
-        // *** Push Images To Registry ***
-        // *******************************
-        stage("Push_Image"){
-            when {
-                anyOf {
-                    environment name: "GIT_BRANCH", value: "origin/dev"
                 }
             }
+        }
+        stage('Build MSI wheel') {
             steps {
-                withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'harbor-jenkins-creds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]){
-                    echo "***** Push Container Image *****"
-                    // Login to the remote Docker Registry
-                    sh 'docker login -u ${USERNAME} -p ${PASSWORD} ${DOCKER_REG}'
-                    sh "python3 scripts/images.py --mode tag --old-tag test --new-tag ${env.VERSION}"
-                    sh "python3 scripts/images.py --mode tag --old-tag test --new-tag latest"
-                    sh "python3 scripts/images.py --mode push --tag ${env.VERSION} --registry ${DOCKER_REG}${DOCKER_REPO}"
-                    sh "python3 scripts/images.py --mode push --tag latest --registry ${DOCKER_REG}${DOCKER_REPO}"
+                sh '''
+                    set -eu
+                    rm -rf .ci-package-build
+                    python3 -m venv .ci-package-build
+                    .ci-package-build/bin/python -m pip install 'build==1.2.2.post1'
+                    .ci-package-build/bin/python scripts/build_validation_sources.py
+                    python3 scripts/prepare_validation.py --wheels .ci-wheels --profile "$VALIDATION_PROFILE"
+                '''
+                archiveArtifacts artifacts: '.ci-wheels/*.whl,.ci-wheels/provenance.json', fingerprint: true
+            }
+        }
+        stage('Build images') {
+            steps { sh 'python3 scripts/images.py --mode build --tag "$CI_IMAGE_TAG" --validation-profile "$VALIDATION_PROFILE"' }
+        }
+        stage('Unit tests') {
+            steps { sh 'python3 scripts/images.py --mode test --tag "$CI_IMAGE_TAG"' }
+        }
+        stage('Push images') {
+            when { expression { env.FL_SOURCE_BRANCH == 'origin/dev' } }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'harbor-jenkins-creds', usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
+                    sh '''
+                        set -eu
+                        printf '%s' "$REG_PASS" | docker login --username "$REG_USER" --password-stdin "$DOCKER_REG"
+                        python3 scripts/images.py --mode tag --old-tag "$CI_IMAGE_TAG" --new-tag "$RELEASE_IMAGE_TAG"
+                        python3 scripts/images.py --mode push --tag "$RELEASE_IMAGE_TAG" --registry "$DOCKER_REG$DOCKER_REPO"
+                    '''
                 }
             }
         }
     }
-    post{
+    post {
         always {
-            echo "***** Clean Up Resources *****"
-            sh "python3 scripts/images.py --mode remove"
+            script {
+                if (env.CI_IMAGE_TAG) { sh 'python3 scripts/images.py --mode untag --tag "$CI_IMAGE_TAG"' }
+            }
         }
-        // failure{
-        //     // slackSend (color: "#FF0000", message: "Job FAILED: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
-        //     sh 'docker image rm ${APP_NAME}:test &> /dev/null || True'
-        //     sh 'DOCKER_TAG=test docker compose down --rmi all'
-        // }
-
-        // success{
-        //     slackSend (color: "#008000", message: "Job SUCCESSFUL: '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})")
-        // }
     }
 }

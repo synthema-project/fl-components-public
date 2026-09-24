@@ -16,14 +16,9 @@ from fl_client import smpc_pb2
 from fl_client.utils.minio_loader import download_object
 from fl_client.utils.minio_loader import upload_dataframe, upload_json, upload_html, download_object
 
-try:
-    from model_store_interface.core.dataset_partition import DatasetPartition
-    from model_store_interface.metadata.models.dataset_metadata import DatasetMetadata
-    from model_store_interface.metadata.models.model import SynthemaDatasetModel
-except ImportError:  # pragma: no cover - compatibility with legacy images
-    DatasetPartition = None
-    DatasetMetadata = None
-    SynthemaDatasetModel = None
+from model_store_interface import DatasetMeta, DatasetPartition
+from fl_client.data_contract import load_partitions, prepare_partitions
+from fl_client.reporting_policy import utility_reporting_enabled
 
 logger = structlog.get_logger()
 
@@ -49,8 +44,7 @@ def set_run_config(
     model_version: int,
     data_path: str,
 ) -> None:
-    if mlflow_client.mlflow.active_run():
-        mlflow_client.mlflow.end_run("FAILED")
+    mlflow_client.clean_current_config("FAILED")
     child_run_id = mlflow_client.create_child_run(
         experiment_id, parent_run_id, node_name
     )
@@ -85,85 +79,58 @@ def load_data(
             f"No dataset paths received for node {global_vars['node_name']}"
         )
 
-    partition_paths = dataset_paths if isinstance(dataset_paths, dict) else {}
-    paths_to_load = (partition_paths.get("train") or partition_paths.get("val") or partition_paths.get("test")) \
-        if partition_paths else dataset_paths
-    if isinstance(paths_to_load, str):
-        paths_to_load = [paths_to_load]
-    dataframes = []
-
-    for object_path in paths_to_load:
-        local_file = object_path if object_path.startswith(("/", ".")) else download_object(object_path)
-        df = pd.read_csv(local_file)
-        dataframes.append(df)
-
-    dataset = pd.concat(dataframes, ignore_index=True)
-
-    global_vars["data"] = dataset
-    global_vars["dataset"] = dataset
-    global_vars["data_partitions"] = {
-        role: pd.read_csv(path if path.startswith(("/", ".")) else download_object(path))
-        for role, path in partition_paths.items() if role != "schema"
-    } if partition_paths else {}
+    partitions, schema = load_partitions(dataset_paths, download_object)
+    # Catalogue governance metadata is not a feature schema. Reset per-task state.
+    global_vars["model_meta"] = schema
+    global_vars["prepared_partitions"] = {}
+    if schema is None and metadata_json:
+        payload = json.loads(metadata_json)
+        if isinstance(payload, dict) and "variables" in payload:
+            global_vars["model_meta"] = DatasetMeta.model_validate(payload)
+    global_vars["data_partitions"] = partitions
+    global_vars["data"] = partitions["train"]
+    global_vars["dataset"] = partitions["train"]
     global_vars["use_case"] = use_case
-    if metadata_json:
-        if SynthemaDatasetModel is not None and evaluation_config_json:
-            global_vars["model_meta"] = SynthemaDatasetModel.from_json(
-                metadata_json=json.loads(metadata_json),
-                evaluation_configuration_json=json.loads(evaluation_config_json),
-            )
-        else:
-            metadata_payload = json.loads(metadata_json)
-            global_vars["model_meta"] = (
-                DatasetMetadata.from_health_dcat_json(metadata_payload)
-                if DatasetMetadata is not None else metadata_payload
-            )
-
 
 
 def prepare_data(global_vars: dict) -> None:
-    local_learner = global_vars["local_learner"]
-    data = global_vars["data"]
-    dataset_meta = global_vars.get("model_meta")
-    if (
-        dataset_meta is not None
-        and DatasetPartition is not None
-        and _accepts_parameter(local_learner.prepare_data, "dataset_meta")
-    ):
-        prepared = local_learner.prepare_data(
-            data=data,
-            partition=DatasetPartition.TRAIN,
-            dataset_meta=dataset_meta,
+    learner = global_vars["local_learner"]
+    metadata = global_vars.get("model_meta")
+    cfg = (metadata.evaluation or {}).get("aml_utility") if metadata is not None else None
+    if utility_reporting_enabled(metadata):
+        from fl_client.data_contract import ensure_utility_holdout
+        global_vars["data_partitions"] = ensure_utility_holdout(global_vars["data_partitions"], cfg)
+    global_vars["data"] = global_vars["data_partitions"]["train"]
+    global_vars["dataset"] = global_vars["data_partitions"]["train"]
+    if _accepts_parameter(learner.prepare_data, "dataset_meta"):
+        prepared = prepare_partitions(
+            learner, global_vars["data_partitions"], global_vars.get("model_meta")
         )
-        if prepared is not None:
-            global_vars["data"] = prepared
+        global_vars["prepared_partitions"] = prepared
+        global_vars["data"] = prepared["train"]
     else:
-        local_learner.prepare_data(data=data)
+        result = learner.prepare_data(data=global_vars["data"])
+        if result is not None:
+            global_vars["data"] = result
 
 
-def load_model(
-    global_vars: dict,
-) -> None:
-    mlf_model = mlflow_client.load_model()
-    global_vars["model"] = mlf_model
-    python_model = mlf_model.unwrap_python_model()
-    if global_vars.get("model_meta") is None and hasattr(python_model, "get_metadata_documents"):
-        try:
-            metadata_json, evaluation_config_json = python_model.get_metadata_documents()
-        except RuntimeError:
-            pass
-        else:
-            if SynthemaDatasetModel is not None:
-                global_vars["model_meta"] = SynthemaDatasetModel.from_json(
-                    metadata_json=metadata_json,
-                    evaluation_configuration_json=evaluation_config_json,
-                )
+def load_model(global_vars: dict) -> None:
+    model = mlflow_client.load_model()
+    global_vars["model"] = model
+    python_model = model.unwrap_python_model()
+    payload = mlflow_client.load_dataset_meta(model)
+    if payload is not None:
+        registered_meta = DatasetMeta.model_validate(payload)
+        # Reporting-enabled models define the feature/endpoint contract and
+        # holdout policy. Older catalogue metadata must not disable evaluation.
+        if global_vars.get("model_meta") is None or (registered_meta.evaluation or {}).get("aml_utility"):
+            global_vars["model_meta"] = registered_meta
     factory = python_model.create_local_learner
-    dataset_meta = global_vars.get("model_meta")
-    if dataset_meta is not None and _accepts_parameter(factory, "dataset_meta"):
-        global_vars["local_learner"] = factory(dataset_meta=dataset_meta)
-    else:
-        global_vars["local_learner"] = factory()
+    metadata = global_vars.get("model_meta")
+    learner = factory(dataset_meta=metadata) if metadata is not None and _accepts_parameter(factory, "dataset_meta") else factory()
+    if _accepts_parameter(learner.prepare_data, "dataset_meta") and metadata is None:
+        raise ValueError("Model requires DatasetMeta, but neither dataset nor registered model provides a feature schema")
+    global_vars["local_learner"] = learner
 
 
 def train_model(
@@ -223,74 +190,106 @@ def upload_model(
     set_model_parameters(latest_parameters, global_vars)
     model_info: dict[str, Any] = mlflow_client.upload_final_state(
         local_learner,
-        dataset_meta=global_vars.get("model_meta"),
+        use_case=global_vars.get("use_case"),
     )
     return model_info
 
 
-def generate_synthetic_data(n_samples: int, global_vars: dict) -> dict[str, str]:
+def generate_synthetic_data(n_samples: int, global_vars: dict, pool_id: str) -> dict[str, str]:
+    from fl_client.utils.minio_loader import publish_pending_pool
+
     learner = global_vars["local_learner"]
     dataset_meta = global_vars.get("model_meta")
     generator = getattr(learner, "generate_synthetic_data", None)
     if generator is None or dataset_meta is None:
         raise RuntimeError("The loaded model does not support metadata-aware synthetic data generation")
     synthetic_data = generator(n_samples, dataset_meta)
-    object_uri = upload_dataframe(
-        synthetic_data,
-        use_case=global_vars["use_case"],
-        model_name=global_vars.get("model_name", "sdg_model"),
-        node_name=global_vars["node_name"],
+    if not isinstance(synthetic_data, pd.DataFrame) or len(synthetic_data) != n_samples:
+        raise ValueError("Generator did not return the requested number of synthetic rows")
+    expected = [variable.name for variable in dataset_meta.variables]
+    if synthetic_data.columns.has_duplicates or not len(synthetic_data.columns):
+        raise ValueError("Synthetic data requires unique, nonempty columns")
+    if set(synthetic_data.columns) - set(expected):
+        raise ValueError("Synthetic data contains columns absent from the model metadata")
+    omitted = sorted(set(expected) - set(synthetic_data.columns))
+    if omitted:
+        logger.warning("Model did not generate all metadata variables", omitted_variables=omitted)
+    expected = [name for name in expected if name in synthetic_data.columns]
+    metadata = dataset_meta.for_publish()
+    source_meta_hash = metadata.pop("meta_hash", None)
+    metadata["variables"] = [v for v in metadata["variables"] if v["name"] in expected]
+    metadata["use_case"] = global_vars["use_case"]
+    # Preserve MSI types and add the storage-interface representation.
+    storage_types = {"numeric": "Number", "integer": "Integer",
+                     "categorical": "Categorical", "binary": "Binary",
+                     "datetime": "Datetime", "text": "Text"}
+    for variable in metadata["variables"]:
+        variable["datatype"] = storage_types[variable["type"]]
+    evaluation = dict(dataset_meta.evaluation or {})
+    evaluation["generation"] = {"omitted_variables": omitted, "validation_performed": False,
+                                "source_meta_hash": source_meta_hash}
+    result = publish_pending_pool(
+        synthetic_data[expected], metadata, evaluation,
+        use_case=global_vars["use_case"], pool_id=pool_id,
     )
-    metadata_json, evaluation_json = dataset_meta.to_json()
-    return {
-        "object_uri": object_uri,
-        "metadata_uri": upload_json(
-            metadata_json,
-            use_case=global_vars["use_case"],
-            model_name=global_vars.get("model_name", "sdg_model"),
-            node_name=global_vars["node_name"],
-            filename="dataset_meta.json",
-        ),
-        "evaluation_uri": upload_json(
-            evaluation_json,
-            use_case=global_vars["use_case"],
-            model_name=global_vars.get("model_name", "sdg_model"),
-            node_name=global_vars["node_name"],
-            filename="evaluation_config.json",
-        ),
-    }
+    result["utility_reporting_enabled"] = utility_reporting_enabled(dataset_meta)
+    return result
 
 
 def validate_synthetic_pool(pool_id: str, object_uri: str, use_case: str,
                             global_vars: dict) -> dict[str, Any]:
-    """Run the configured validator, or a clearly-labelled smoke validator.
+    if not utility_reporting_enabled(global_vars.get("model_meta")):
+        raise ValueError("Utility reporting is disabled for this deployment or model")
+    from fl_client.utils.minio_loader import upload_pool_utility_report
 
-    Private AML/SCD packages can later be exposed as ``module:callable`` via
-    VALIDATION_PROVIDER. They receive (real_data, synthetic_data, use_case,
-    dataset_meta) and must return ``(metrics, html)``.
-    """
+    metadata = global_vars.get("model_meta")
+    if use_case.upper() != "AML" or metadata is None:
+        raise ValueError("AML utility reporting requires AML model metadata")
+    holdout = global_vars.get("data_partitions", {}).get("test")
+    if holdout is None:
+        raise ValueError("AML utility reporting requires an independent test/holdout partition")
     synthetic = pd.read_csv(download_object(object_uri))
-    real = global_vars.get("data_partitions", {}).get("train", global_vars.get("data"))
-    provider = os.getenv("VALIDATION_PROVIDER", "placeholder")
-    if provider != "placeholder":
-        module_name, function_name = provider.split(":", 1)
-        provider_fn = getattr(__import__(module_name, fromlist=[function_name]), function_name)
-        metrics, html = provider_fn(real, synthetic, use_case, global_vars.get("model_meta"))
+    reporting_python = os.getenv("AML_UTILITY_PYTHON")
+    if not reporting_python and os.getenv("VALIDATION_PROFILE") == "aml":
+        reporting_python = "/opt/aml-utility/bin/python"
+    if os.getenv("VALIDATION_PROFILE") == "none" and not reporting_python:
+        raise ValueError("This client image was built without AML reporting; deploy an aml image")
+    if reporting_python:
+        import tempfile
+        import subprocess
+        from pathlib import Path
+        with tempfile.TemporaryDirectory(prefix="aml-report-") as work:
+            work = Path(work)
+            synthetic.to_csv(work / "synthetic.csv", index=False)
+            holdout.to_csv(work / "holdout.csv", index=False)
+            (work / "metadata.json").write_text(metadata.model_dump_json())
+            try:
+                subprocess.run([
+                    reporting_python, "-m", "model_store_interface.aml_utility",
+                    "--synthetic", str(work / "synthetic.csv"),
+                    "--holdout", str(work / "holdout.csv"),
+                    "--metadata", str(work / "metadata.json"),
+                    "--output", str(work / "report.html"),
+                    "--node", global_vars["node_name"],
+                ], check=True, timeout=1500, capture_output=True, text=True)
+            except subprocess.CalledProcessError as error:
+                # Do not send raw data or validator stdout over Flower.
+                logger.error("AML report process failed", returncode=error.returncode)
+                raise RuntimeError("AML utility report failed; verify configured columns, event values and survival durations") from error
+            report = (work / "report.html").read_text()
     else:
-        common = sorted(set(real.columns) & set(synthetic.columns))
-        metrics = {"provider": "placeholder", "column_overlap": len(common) / max(len(real.columns), 1),
-                   "synthetic_rows": int(len(synthetic)), "real_rows": int(len(real))}
-        html = (f"<html><body><h1>Placeholder validation report</h1>"
-                f"<p>Use case: {use_case}</p><pre>{json.dumps(metrics, indent=2)}</pre>"
-                "<p>Replace VALIDATION_PROVIDER with the private validator.</p></body></html>")
-    report_uri = upload_html(html, use_case=use_case,
-                             model_name=global_vars.get("model_name", "sdg_model"),
-                             node_name=global_vars["node_name"],
-                             filename=f"{pool_id}_{global_vars['node_name']}.html")
-    return {"node_name": global_vars["node_name"], "metrics": metrics, "report_uri": report_uri}
+        from model_store_interface.aml_utility import generate_aml_utility_report
+        report = generate_aml_utility_report(synthetic, holdout, metadata, global_vars["node_name"])
+    report_uri = upload_pool_utility_report(report, object_uri=object_uri,
+                                           pool_id=pool_id, node_name=global_vars["node_name"])
+    return {"node_name": global_vars["node_name"], "report_uri": report_uri,
+            "metrics": {"provider": "sd_quality", "scope": "aml_utility",
+                        "holdout_rows": len(holdout), "synthetic_rows": len(synthetic),
+                        "privacy_evaluated": False}}
 
-def clean_current_config() -> None:
-    mlflow_client.clean_current_config()
+
+def clean_current_config(status: str = "FINISHED") -> None:
+    mlflow_client.clean_current_config(status)
 
 def start_P2P_server(client_id: int, port: int, global_vars: dict) -> SMPCClient:
     smpc_client = SMPCClient(client_id, port)

@@ -19,6 +19,9 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV UV_FIND_LINKS=/wheels
 
+# Resolve MSI from the exact validated wheel, including a version newer than
+# the compatibility baseline declared in pyproject.toml.
+RUN python -c "from pathlib import Path; import json; w=list(Path('/wheels').glob('model_store_interface-*.whl')); assert len(w)==1; p=Path('pyproject.toml'); p.write_text(p.read_text()+'\n[tool.uv]\noverride-dependencies = '+json.dumps(['model-store-interface @ '+w[0].as_uri()])+'\n')"
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --group dev
 

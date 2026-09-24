@@ -8,8 +8,8 @@ from flwr.common import (
 )
 
 
-def create_participate_response(msg: Message, participate: bool) -> Message:
-    configsrecord = ConfigsRecord({"participate": participate})
+def create_participate_response(msg: Message, participate: bool, node_name: str) -> Message:
+    configsrecord = ConfigsRecord({"success": True, "participate": participate, "node_name": node_name})
     rs = RecordSet(configs_records={"config": configsrecord})
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
 
@@ -39,6 +39,7 @@ def create_synthetic_data_response(
     node_name: str,
     metadata_uri: str,
     evaluation_uri: str,
+    utility_reporting_enabled: bool = False,
 ) -> Message:
     configsrecord = ConfigsRecord({
         "success": True,
@@ -46,14 +47,20 @@ def create_synthetic_data_response(
         "node_name": node_name,
         "metadata_uri": metadata_uri,
         "evaluation_uri": evaluation_uri,
+        "utility_reporting_enabled": utility_reporting_enabled,
         "message": "synthetic data uploaded successfully",
     })
     return msg.create_reply(content=RecordSet(configs_records={"config": configsrecord}), ttl=DEFAULT_TTL)
 
 
 def create_validation_response(msg: Message, result: dict) -> Message:
+    import json
     return msg.create_reply(content=RecordSet(configs_records={
-        "validation": ConfigsRecord(result),
+        "config": ConfigsRecord({"success": True, "message": "AML utility report uploaded"}),
+        "validation": ConfigsRecord({
+            "node_name": result["node_name"], "report_uri": result["report_uri"],
+            "metrics_json": json.dumps(result["metrics"]),
+        }),
     }), ttl=DEFAULT_TTL)
 
 

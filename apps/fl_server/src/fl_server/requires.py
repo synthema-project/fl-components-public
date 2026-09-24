@@ -1,4 +1,6 @@
 from random import choice
+from uuid import uuid4
+import json
 import structlog
 from flwr.common import (
     DEFAULT_TTL,
@@ -25,6 +27,7 @@ def execution_flow(
     recordset_factory=None,
     recordset_factory_args=None,
     per_node_recordset_factory=None,
+    timeout=None,
 ):
     messages = []
 
@@ -49,7 +52,7 @@ def execution_flow(
 
     message_ids = driver_utils.send_messages(driver, messages)
 
-    replies = driver_utils.wait_messages(driver, message_ids)
+    replies = driver_utils.wait_messages(driver, message_ids, timeout=timeout) if timeout is not None else driver_utils.wait_messages(driver, message_ids)
 
     if check_success:
         requires_utils.check_success_clients(replies)
@@ -57,7 +60,9 @@ def execution_flow(
     return replies
 
 
-def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[int]:
+def filter_clients(driver: Driver, node_ids: list[int], use_case: str,
+                   selected_nodes: list[str] | None = None,
+                   node_names: dict[int, str] | None = None) -> list[int]:
     all_replies = execution_flow(
         driver=driver,
         node_ids=node_ids,
@@ -65,9 +70,37 @@ def filter_clients(driver: Driver, node_ids: list[int], use_case: str) -> list[i
         msg_type=MessageType.QUERY,
         msg_group="filter_message",
         recordset_factory_args=(use_case,),
+        check_success=False,
     )
-    filtered_node_ids = stages.filter_clients(all_replies)
-    return filtered_node_ids
+    names = resolve_node_selection(all_replies, selected_nodes)
+    if node_names is not None:
+        node_names.update(names)
+    return list(names)
+
+
+def resolve_node_selection(replies, selected_nodes=None) -> dict[int, str]:
+    """Resolve catalogue identities without guessing from Flower runtime IDs."""
+    available = {}
+    for reply in replies:
+        if reply.has_error():
+            continue
+        response = reply.content.configs_records["config"]
+        if not response.get("participate", False):
+            continue
+        name = response.get("node_name", None)
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Participating client did not report NODE_NAME; rebuild FL clients")
+        if selected_nodes is not None and name not in selected_nodes:
+            continue
+        if name in available.values():
+            raise ValueError(f"Multiple connected clients report NODE_NAME {name}")
+        available[reply.metadata.src_node_id] = name
+    missing = set(selected_nodes or []) - set(available.values())
+    if missing:
+        raise ValueError(f"Selected nodes unavailable for this use case: {', '.join(sorted(missing))}")
+    if not available:
+        raise ValueError("No eligible FL clients available for this use case")
+    return available
 
 
 def load_data(
@@ -75,6 +108,7 @@ def load_data(
     node_ids: list[int],
     use_case: str,
     metadata_documents: tuple[str, str] | None = None,
+    node_names: dict[int, str] | None = None,
 ):
 
     if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
@@ -88,9 +122,15 @@ def load_data(
     else:
         metadata_json, evaluation_config_json = metadata_documents
 
+    if node_names is None or any(node_id not in node_names for node_id in node_ids):
+        raise ValueError("Missing catalogue identity for participating FL client")
+    missing = [node_names[node_id] for node_id in node_ids
+               if not node_dataset_map.get(node_names[node_id])]
+    if missing:
+        raise ValueError(f"No catalogue datasets for participating nodes: {', '.join(missing)}")
+
     def per_node_recordset_factory(node_id: int):
-        node_name = f"NODE{node_id}"
-        dataset_paths = node_dataset_map.get(node_name, [])
+        dataset_paths = node_dataset_map[node_names[node_id]]
 
         return interfaces.recordset.create_load_data_recordset(
             use_case,
@@ -153,7 +193,9 @@ def generate_synthetic_data(
     n_samples: int,
     use_case: str,
     model_name: str,
+    node_names: dict[int, str] | None = None,
 ):
+    pool_id = str(uuid4())
     selected_node = [choice(node_ids)]
     replies = execution_flow(
         driver=driver,
@@ -161,20 +203,21 @@ def generate_synthetic_data(
         recordset_factory=interfaces.recordset.create_generate_synthetic_data_recordset,
         msg_type=MessageType.QUERY,
         msg_group="generate_synthetic_data",
-        recordset_factory_args=(n_samples,),
+        recordset_factory_args=(n_samples, pool_id),
         check_success=True,
     )
     config = replies[0].content.configs_records["config"]
-    object_uri = config.get("object_uri")
-    node_name = config.get("node_name")
-    metadata_uri = config.get("metadata_uri")
-    evaluation_uri = config.get("evaluation_uri")
+    object_uri = config.get("object_uri", None)
+    node_name = config.get("node_name", None)
+    metadata_uri = config.get("metadata_uri", None)
+    evaluation_uri = config.get("evaluation_uri", None)
     if not all(isinstance(value, str) for value in (object_uri, node_name, metadata_uri, evaluation_uri)):
         raise RuntimeError("Synthetic-data response did not contain complete object and metadata URIs")
     if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
         raise RuntimeError("DATA_CATALOGUE_TOKEN must be configured to register synthetic data")
     catalogue_client = DataCatalogueClient(base_url=DATA_CATALOGUE_URL, token=DATA_CATALOGUE_TOKEN)
     catalogue_result = catalogue_client.register_synthetic_pool(
+        pool_id=pool_id,
         use_case=use_case,
         model_name=model_name,
         node_name=node_name,
@@ -183,26 +226,31 @@ def generate_synthetic_data(
         metadata_uri=metadata_uri,
         evaluation_uri=evaluation_uri,
         token=DATA_CATALOGUE_TOKEN,
+        validation_nodes=list((node_names or {}).values()),
     )
-    pool_id = catalogue_result.get("pool_id")
-    if pool_id:
-        validation_replies = execution_flow(
-            driver=driver,
-            node_ids=node_ids,
+    # Report evaluation is a separate phase. Never substitute placeholder
+    # metrics for clinical/privacy validation or auto-approve a generated pool.
+    if catalogue_result.get("pool_id") != pool_id:
+        raise RuntimeError("Catalogue returned a different synthetic pool identity")
+    if config.get("utility_reporting_enabled", False):
+        if use_case != "AML" or not node_names:
+            raise ValueError("AML utility reporting requires identified participating nodes")
+        replies = execution_flow(
+            driver=driver, node_ids=node_ids,
             recordset_factory=interfaces.recordset.create_validate_synthetic_pool_recordset,
-            msg_type=MessageType.QUERY,
-            msg_group=f"validate_pool_{pool_id}",
+            msg_type=MessageType.QUERY, msg_group=f"validate_pool_{pool_id}",
             recordset_factory_args=(pool_id, object_uri, use_case),
-            check_success=True,
+            check_success=True, timeout=1800,
         )
-        for reply in validation_replies:
-            payload = reply.content.configs_records["validation"]
+        for reply in replies:
+            report = reply.content.configs_records["validation"]
             catalogue_client.register_pool_validation(
-                pool_id=pool_id,
-                node_name=str(payload["node_name"]),
-                metrics=dict(payload.get("metrics", {})),
-                report_uri=str(payload["report_uri"]),
+                pool_id=pool_id, node_name=report["node_name"],
+                metrics=json.loads(report["metrics_json"]), report_uri=report["report_uri"],
             )
+        logger.info("AML utility reports registered; privacy evaluation pending", pool_id=pool_id)
+    else:
+        logger.info("Synthetic pool published, awaiting reports", pool_id=pool_id)
     return {"object_uri": object_uri, "catalogue": catalogue_result}
 
 
@@ -320,6 +368,7 @@ def set_SMPC_enabled(
 def clean_config(
     driver: Driver,
     node_ids: list[int],
+    status: str = "FINISHED",
 ) -> None:
     execution_flow(
         driver=driver,
@@ -328,6 +377,8 @@ def clean_config(
         msg_type=MessageType.QUERY,
         msg_group="clean_config",
         check_success=True,
+        recordset_factory_args=(status,),
+        timeout=15,
     )
 
 ## Require P2P established

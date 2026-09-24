@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlmodel import SQLModel
+from schemas.migrations import upgrade_task_node_selection
 from status_listener import config
 from typing import AsyncGenerator
 
@@ -19,6 +20,7 @@ async def create_db_and_tables() -> None:
     """Creates database tables asynchronously."""
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(upgrade_task_node_selection)
 
 
 async def drop_db_and_tables() -> None:

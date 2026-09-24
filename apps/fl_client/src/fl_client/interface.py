@@ -11,7 +11,7 @@ from fl_client import stages
 from fl_client.utils import responses_utils
 from fl_client.utils import peer_discovery
 from fl_client.utils.parameters_utils import serialize_parameters, deserialize_parameters, split_model_parameters_to_shares, numpy_dict_to_torch_state_dict
-from fl_client.utils.responses_utils import create_error_response, create_generate_synthetic_response
+from fl_client.utils.responses_utils import create_error_response
 
 logger = structlog.get_logger()
 
@@ -48,13 +48,16 @@ def upload_model_if(msg: Message, global_vars: dict) -> Message:
 
 def generate_synthetic_data_if(msg: Message, global_vars: dict) -> Message:
     n_samples = recordset.read_generate_synthetic_data_recordset(msg.content)
-    result = stages.generate_synthetic_data(n_samples, global_vars)
+    result = stages.generate_synthetic_data(
+        n_samples, global_vars, str(msg.content.configs_records["config"]["pool_id"])
+    )
     return responses_utils.create_synthetic_data_response(
         msg,
         result["object_uri"],
         global_vars["node_name"],
         result["metadata_uri"],
         result["evaluation_uri"],
+        result.get("utility_reporting_enabled", False),
     )
 
 
@@ -157,7 +160,7 @@ def set_run_config_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_success_response(msg, "set run config successfully")
 
 def clean_config_if(msg: Message) -> Message:
-    stages.clean_current_config()
+    stages.clean_current_config(msg.content.configs_records["config"].get("status", "FINISHED"))
     return responses_utils.create_success_response(msg, "cleaned config successfully")
 
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
@@ -167,8 +170,8 @@ def filter_clients_if(msg: Message, global_vars: dict) -> Message:
     # accept the task instead of applying the obsolete iris default.
     configured_use_case = global_vars.get("use_case")
     if not configured_use_case or use_case == configured_use_case:
-        return responses_utils.create_participate_response(msg, True)
-    return responses_utils.create_participate_response(msg, False)
+        return responses_utils.create_participate_response(msg, True, global_vars["node_name"])
+    return responses_utils.create_participate_response(msg, False, global_vars["node_name"])
 
 def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
     config = recordset.read_discover_peers_recordset(msg.content)
@@ -215,6 +218,9 @@ def generate_synthetic_if(msg: Message, global_vars: dict) -> Message:
         return create_error_response(msg, f"Invalid generate_synthetic recordset: {e}")
 
     try:
+        # Optional legacy handler must not prevent ClientApp startup.
+        from fl_client.utils.responses_utils import create_generate_synthetic_response
+
         result = stages.generate_synthetic_and_upload(
             global_vars,
             params["n_samples"],
