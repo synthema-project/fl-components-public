@@ -284,4 +284,6 @@ def test_clean_config(driver, node_ids):
         msg_type=MessageType.QUERY,
         msg_group="clean_config",
         check_success=True,
+        recordset_factory_args=("FINISHED",),
+        timeout=15,
     )

@@ -109,18 +109,27 @@ def load_data(
     use_case: str,
     metadata_documents: tuple[str, str] | None = None,
     node_names: dict[int, str] | None = None,
+    dataset_snapshot: dict | None = None,
 ):
 
-    if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
+    if not DATA_CATALOGUE_URL:
         raise RuntimeError("DATA_CATALOGUE_URL and DATA_CATALOGUE_TOKEN must be configured to load federated datasets")
 
     catalogue_client = DataCatalogueClient(base_url=DATA_CATALOGUE_URL, token=DATA_CATALOGUE_TOKEN)
 
-    node_dataset_map = catalogue_client.get_use_case_datasets(use_case)
-    if metadata_documents is None:
+    if dataset_snapshot:
+        if dataset_snapshot.get('use_case') != use_case or set(dataset_snapshot.get('nodes', {})) != set((node_names or {}).values()):
+            raise ValueError('Task dataset snapshot does not match participating nodes')
+        entries = dataset_snapshot['nodes']
+        node_dataset_map = {node: entry['paths'] for node, entry in entries.items()}
+        catalogue_client.selected_documents = {node: (json.dumps(entry['documents']['metadata']),
+            json.dumps(entry['documents']['evaluation'])) for node, entry in entries.items()}
+    else:
+        node_dataset_map = catalogue_client.get_use_case_datasets(use_case)
+    if metadata_documents is None and not dataset_snapshot:
         metadata_json, evaluation_config_json = catalogue_client.get_use_case_metadata(use_case)
     else:
-        metadata_json, evaluation_config_json = metadata_documents
+        metadata_json, evaluation_config_json = metadata_documents or (None, None)
 
     if node_names is None or any(node_id not in node_names for node_id in node_ids):
         raise ValueError("Missing catalogue identity for participating FL client")
@@ -129,14 +138,23 @@ def load_data(
     if missing:
         raise ValueError(f"No catalogue datasets for participating nodes: {', '.join(missing)}")
 
+    selected = getattr(catalogue_client, "selected_documents", {})
+    if isinstance(selected, dict) and selected:
+        configs = {selected.get(node_names[node_id]) for node_id in node_ids}
+        if None in configs or len(configs) != 1:
+            raise ValueError("Participating datasets must use the same central metadata/evaluation version")
+
     def per_node_recordset_factory(node_id: int):
         dataset_paths = node_dataset_map[node_names[node_id]]
 
+        selected = getattr(catalogue_client, "selected_documents", {})
+        node_documents = selected.get(node_names[node_id]) if isinstance(selected, dict) else None
+        meta, evaluation = node_documents or (metadata_json, evaluation_config_json)
         return interfaces.recordset.create_load_data_recordset(
             use_case,
             dataset_paths,
-            metadata_json,
-            evaluation_config_json,
+            meta,
+            evaluation,
         )
 
     execution_flow(
@@ -194,6 +212,8 @@ def generate_synthetic_data(
     use_case: str,
     model_name: str,
     node_names: dict[int, str] | None = None,
+    dataset_snapshot: dict | None = None,
+    task_id: int | None = None,
 ):
     pool_id = str(uuid4())
     selected_node = [choice(node_ids)]
@@ -213,7 +233,7 @@ def generate_synthetic_data(
     evaluation_uri = config.get("evaluation_uri", None)
     if not all(isinstance(value, str) for value in (object_uri, node_name, metadata_uri, evaluation_uri)):
         raise RuntimeError("Synthetic-data response did not contain complete object and metadata URIs")
-    if not DATA_CATALOGUE_URL or not DATA_CATALOGUE_TOKEN:
+    if not DATA_CATALOGUE_URL:
         raise RuntimeError("DATA_CATALOGUE_TOKEN must be configured to register synthetic data")
     catalogue_client = DataCatalogueClient(base_url=DATA_CATALOGUE_URL, token=DATA_CATALOGUE_TOKEN)
     catalogue_result = catalogue_client.register_synthetic_pool(
@@ -226,15 +246,16 @@ def generate_synthetic_data(
         metadata_uri=metadata_uri,
         evaluation_uri=evaluation_uri,
         token=DATA_CATALOGUE_TOKEN,
-        validation_nodes=list((node_names or {}).values()),
+        validation_nodes=[node_names[node] for node in node_ids] if node_names else [],
+        **({"dataset_snapshot": dataset_snapshot, "task_id": task_id} if dataset_snapshot else {}),
     )
     # Report evaluation is a separate phase. Never substitute placeholder
     # metrics for clinical/privacy validation or auto-approve a generated pool.
     if catalogue_result.get("pool_id") != pool_id:
         raise RuntimeError("Catalogue returned a different synthetic pool identity")
     if config.get("utility_reporting_enabled", False):
-        if use_case != "AML" or not node_names:
-            raise ValueError("AML utility reporting requires identified participating nodes")
+        if use_case not in {"AML", "SCD"} or not node_names:
+            raise ValueError("Reporting requires identified participating nodes")
         replies = execution_flow(
             driver=driver, node_ids=node_ids,
             recordset_factory=interfaces.recordset.create_validate_synthetic_pool_recordset,
@@ -244,11 +265,14 @@ def generate_synthetic_data(
         )
         for reply in replies:
             report = reply.content.configs_records["validation"]
-            catalogue_client.register_pool_validation(
-                pool_id=pool_id, node_name=report["node_name"],
-                metrics=json.loads(report["metrics_json"]), report_uri=report["report_uri"],
-            )
-        logger.info("AML utility reports registered; privacy evaluation pending", pool_id=pool_id)
+            reports = json.loads(report.get("reports_json", "[]")) or [
+                {"metrics": json.loads(report["metrics_json"]), "report_uri": report["report_uri"]}]
+            for artifact in reports:
+                catalogue_client.register_pool_validation(
+                    pool_id=pool_id, node_name=report["node_name"],
+                    metrics=artifact["metrics"], report_uri=artifact["report_uri"],
+                )
+        logger.info("Available validation reports registered", pool_id=pool_id)
     else:
         logger.info("Synthetic pool published, awaiting reports", pool_id=pool_id)
     return {"object_uri": object_uri, "catalogue": catalogue_result}

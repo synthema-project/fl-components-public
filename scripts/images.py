@@ -74,7 +74,7 @@ def parse_args():
     parser.add_argument(
         "--tag", type=str, help="Tag for the images (or tag to remove)."
     )
-    parser.add_argument("--validation-profile", choices=["none", "aml", "scd"], default="none")
+    parser.add_argument("--validation-profile", choices=["none", "aml", "aml-full", "scd-full"], default="none")
     parser.add_argument(
         "--registry", type=str, help="Registry prefix (required for push)."
     )
@@ -186,6 +186,11 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
     cmd = ["docker", "build", "--rm", "--platform", "linux/amd64", "-t", full_tag]
     for key, value in build_args.items():
         cmd += ["--build-arg", f"{key}={value}"]
+    if image_def.get('msi'):
+        for secret_id, variable in [('synthema_username', 'UV_INDEX_SYNTHEMA_USERNAME'),
+                                    ('synthema_password', 'UV_INDEX_SYNTHEMA_PASSWORD')]:
+            if os.getenv(variable):
+                cmd += ['--secret', f'id={secret_id},env={variable}']
     cmd.append(str(path))
 
     env = {**os.environ, "DOCKER_BUILDKIT": "1"}

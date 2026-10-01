@@ -1,195 +1,68 @@
-import pytest
+"""Stage errors, state handling and model publication with the current MSI contract."""
 from unittest.mock import Mock, patch
-
 import pandas as pd
-from mlflow.pyfunc import PyFuncModel
-from torch.utils.data import DataLoader
+import pytest
 from flwr.common import MetricsRecord
-
+from testing import Learner, dataset_model, model, create_partitions, configuration
 from fl_client import stages
-from fl_client.config import DATA_PATH
-
-from fl_models.iris.fl_model import FLModel
-from model_store_interface.mlflow_interface import FederatedModel
-from model_store_interface.core.dataset_partition import DatasetPartition
+from interfaces import mlflow_client
+import json
 
 
-@pytest.fixture(scope="session")
-def fl_model():
-    return FederatedModel()
+@pytest.fixture
+def state(tmp_path):
+    metadata, evaluation = configuration()
+    result = {'node_name': 'ICH', 'local_learner': Learner()}
+    stages.load_data('AML', create_partitions(tmp_path), result, json.dumps(metadata), json.dumps(evaluation))
+    stages.prepare_data(result)
+    return result
 
 
-@pytest.fixture(scope="session")
-def fl_model_wrapper(fl_model):
-    wrapper = Mock(spec=PyFuncModel)
-    wrapper.unwrap_python_model.return_value = fl_model
-    return wrapper
+def test_load_data_missing_paths():
+    with pytest.raises(ValueError, match='No dataset paths'):
+        stages.load_data('AML', [], {'node_name': 'ICH'})
 
 
-@pytest.fixture(scope="function")
-def global_vars_dict(
-    fl_model: FLModel,
-):
-    global_vars = dict()
-    global_vars["local_learner"] = fl_model.create_local_learner()
-    global_vars["node_name"] = "test_node"
-    global_vars["use_case"] = "test_case"
-    global_vars["data"] = pd.read_csv(DATA_PATH)
-
-    # Create mock for model_meta
-    global_vars["model_meta"] = Mock()
-    global_vars["model_meta"].name = "test_model"
-    global_vars["model_meta"].description = "test_description"
-    global_vars["model_meta"].tags = {"use_case": global_vars["use_case"]}
-
-    # Create mlflow config
-    global_vars["mlflow_experiment_id"] = "test_experiment"
-    global_vars["mlflow_run_id"] = "test_run"
-    yield global_vars
+def test_load_model_uses_loaded_schema(state):
+    with patch.object(mlflow_client, 'load_model', return_value=model()), patch.object(mlflow_client, 'load_dataset_meta', return_value=None):
+        stages.load_model(state)
+    assert isinstance(state['local_learner'], Learner)
 
 
-@patch("fl_client.stages.download_object")
-def test_load_data_success(mock_download, global_vars_dict):
-    mock_download.return_value = DATA_PATH
-    global_vars = global_vars_dict
-    stages.load_data("iris", ["dummy_path"], global_vars)
-    assert isinstance(global_vars[DatasetPartition.TRAIN], pd.DataFrame)
-
-
-def test_load_data_error(global_vars_dict):
-    with pytest.raises(ValueError):
-        stages.load_data("unknown", [], global_vars_dict)
-
-
-def test_prepare_data(global_vars_dict):
-    global_vars = global_vars_dict
-    local_learner = global_vars["local_learner"]
-    stages.prepare_data(global_vars)
-    if hasattr(local_learner, "dataloader"):
-        assert isinstance(local_learner.dataloader, DataLoader)
-
-
-def test_load_model(fl_model_wrapper):
-    # Mocking the global_vars dictionary
-    global_vars = {}
-
-    # Load model from mlflow
-    with patch(
-        "fl_client.stages.mlflow_client.load_model",
-        return_value=fl_model_wrapper,
-    ):
-        stages.load_model(global_vars)
-
-    # Asserting the global variables are set correctly
-    assert isinstance(global_vars["model"], PyFuncModel)
-    assert global_vars["local_learner"] is not None
-
-
-def test_upload_model(global_vars_dict):
-    # Create the local learner
-    global_vars = global_vars_dict
-    local_learner = global_vars["local_learner"]
-    parameters_record = local_learner.get_parameters()
-    with patch(
-        "fl_client.stages.mlflow_client.upload_final_state"
-    ) as mock_upload_model:
-        stages.upload_model(parameters_record, global_vars)
-
-    mock_upload_model.assert_called_once()
-
-
-@patch("fl_client.stages.mlflow_client")
-def test_set_run_config(mock_mlflow_client):
-    mock_mlflow_client.create_child_run = Mock()
-    mock_mlflow_client.set_current_config = Mock()
-    mock_mlflow_client.set_dataset_signature = Mock()
-
-    config = {
-        "experiment_id": "test_experiment",
-        "parent_run_id": "test_run",
-        "node_name": "test_node",
-        "model_name": "test_model",
-        "model_version": 1,
-        "data_path": "test_data_path",
-    }
-    stages.set_run_config(**config)
-
-    mock_mlflow_client.create_child_run.assert_called_once_with(
-        config["experiment_id"], config["parent_run_id"], config["node_name"]
-    )
-
-    mock_mlflow_client.set_current_config.assert_called_once_with(
-        config["experiment_id"],
-        config["parent_run_id"],
-        mock_mlflow_client.create_child_run.return_value,
-        config["model_name"],
-        config["model_version"],
-    )
-
-    mock_mlflow_client.set_dataset_signature.assert_called_once_with(
-        config["node_name"],
-        config["data_path"],
-        mock_mlflow_client.create_child_run.return_value,
-    )
-
-
-def test_train_model_success(global_vars_dict):
-    global_vars = global_vars_dict
-    with patch.object(global_vars["local_learner"], "train_round") as mock_train:
-        mock_train.return_value = MetricsRecord({"loss": 0.1})
-        with patch("fl_client.stages.mlflow_client.log_metrics") as mock_log_metrics:
-            metrics = stages.train_model(global_vars, 1)
-
-    assert metrics is not None
-    assert metrics["loss"] == 0.1
-
-    mock_log_metrics.assert_called_once_with(metrics, 1)
-
-
-def test_train_model_error(global_vars_dict):
-    global_vars = global_vars_dict
-    with patch.object(global_vars["local_learner"], "train_round") as mock_train:
-        mock_train.return_value = "error"
+@pytest.mark.parametrize('method', ['get_parameters', 'train_round', 'evaluate'])
+def test_invalid_learner_responses_are_rejected(state, method):
+    with patch.object(state['local_learner'], method, return_value='invalid'), patch.object(mlflow_client, 'log_metrics'):
         with pytest.raises(TypeError):
-            stages.train_model(global_vars, 1)
+            if method == 'get_parameters':
+                stages.get_model_parameters(state)
+            elif method == 'train_round':
+                stages.train_model(state, 1)
+            else:
+                stages.evaluate_model(state)
 
 
-def test_evaluate_model_success(global_vars_dict):
-    global_vars = global_vars_dict
-    with patch.object(global_vars["local_learner"], "evaluate") as mock_evaluate:
-        mock_evaluate.return_value = MetricsRecord({"accuracy": 0.9})
-        metrics = stages.evaluate_model(global_vars)
-
-    assert metrics is not None
-    assert metrics["accuracy"] == 0.9
+def test_evaluation_uses_validation_partition(state):
+    with patch.object(state['local_learner'], 'evaluate', return_value=MetricsRecord({'n_samples': 24})) as evaluate:
+        result = stages.evaluate_model(state)
+    assert len(evaluate.call_args.args[0]) == 24
+    assert result['n_samples'] == 24
 
 
-def test_evaluate_model_error(global_vars_dict):
-    global_vars = global_vars_dict
-    with patch.object(global_vars["local_learner"], "evaluate") as mock_evaluate:
-        mock_evaluate.return_value = "error"
-        with pytest.raises(TypeError):
-            stages.evaluate_model(global_vars)
+def test_upload_keeps_final_parameters(state):
+    state['local_learner'].mean[:] = 5
+    parameters = stages.get_model_parameters(state)
+    with patch.object(mlflow_client, 'upload_final_state', return_value={'model_id': 'trained'}) as upload:
+        stages.upload_model(parameters, state)
+    upload.assert_called_once_with(state['local_learner'], use_case='AML')
+    assert (state['local_learner'].mean == 5).all()
 
 
-def test_get_model_parameters_success(global_vars_dict):
-    global_vars = global_vars_dict
-    parameters = stages.get_model_parameters(global_vars)
-
-    assert parameters is not None
-
-
-def test_get_model_parameters_error(global_vars_dict):
-    global_vars = global_vars_dict
-    with patch.object(
-        global_vars["local_learner"], "get_parameters"
-    ) as mock_get_parameters:
-        mock_get_parameters.return_value = "error"
-        with pytest.raises(TypeError):
-            stages.get_model_parameters(global_vars)
-
-
-@patch("fl_client.stages.mlflow_client.clean_current_config")
-def test_clean_current_config(mock_clean_current_config):
-    stages.clean_current_config()
-    mock_clean_current_config.assert_called_once()
+def test_run_configuration_and_cleanup():
+    with patch.object(stages, 'mlflow_client') as tracking:
+        stages.set_run_config('experiment', 'parent', 'ICH', 'model', 1, 'train.csv')
+        tracking.clean_current_config.assert_called_once_with('FAILED')
+        tracking.create_child_run.assert_called_once_with('experiment', 'parent', 'ICH')
+        tracking.set_dataset_signature.assert_called_once()
+    with patch.object(mlflow_client, 'clean_current_config') as cleanup:
+        stages.clean_current_config()
+        cleanup.assert_called_once()

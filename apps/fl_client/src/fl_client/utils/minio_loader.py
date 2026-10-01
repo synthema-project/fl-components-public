@@ -78,6 +78,9 @@ def download_object(object_path: str) -> str:
         # bucket.  Dataset objects are all stored in the ingestion bucket.
         bucket = os.getenv("MINIO_BUCKET_NAME", "data-annotation")
     object_name = parsed.path.lstrip("/")
+    if "://" not in object_path and "/" not in object_path:
+        bucket = os.getenv("MINIO_BUCKET_NAME", "data-annotation")
+        object_name = object_path
 
     local_filename = object_name.split("/")[-1]
     local_path = f"/tmp/{local_filename}"
@@ -142,15 +145,26 @@ def publish_pending_pool(data: DataFrame, metadata: dict, evaluation: dict, *,
     }
 
 
-def upload_pool_utility_report(html: str, *, object_uri: str, pool_id: str, node_name: str) -> str:
+def upload_pool_report(html: str, *, object_uri: str, pool_id: str, node_name: str, kind: str) -> str:
+    if kind not in {"utility", "privacy", "fidelity"}:
+        raise ValueError("Unsupported report kind")
     from uuid import UUID
     from urllib.parse import quote
     uri = urlparse(object_uri)
     parts = uri.path.strip("/").split("/")
     if uri.scheme != "s3" or len(parts) != 3 or parts[1] != str(UUID(pool_id)) or parts[2] != "data.csv":
         raise ValueError("Invalid canonical pool URI for utility report")
-    key = f"{parts[0]}/{pool_id}/evaluation_reports/{quote(node_name, safe='')}_utility.html"
+    key = f"{parts[0]}/{pool_id}/evaluation_reports/{quote(node_name, safe='')}_{kind}.html"
     data = html.encode("utf-8")
-    _get_minio_client().put_object(uri.netloc, key, io.BytesIO(data),
-                                  length=len(data), content_type="text/html")
-    return f"s3://{uri.netloc}/{key}"
+    from fl_client.report_storage import require_private_bucket
+    bucket = os.getenv('MINIO_REPORT_BUCKET', 'synthetic-validation-reports')
+    client = _get_minio_client()
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+    require_private_bucket(client, bucket)
+    client.put_object(bucket, key, io.BytesIO(data), length=len(data), content_type="text/html")
+    return f"s3://{bucket}/{key}"
+
+
+def upload_pool_utility_report(html, **kwargs):
+    return upload_pool_report(html, kind="utility", **kwargs)

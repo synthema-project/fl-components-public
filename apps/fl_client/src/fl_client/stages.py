@@ -16,9 +16,10 @@ from fl_client import smpc_pb2
 from fl_client.utils.minio_loader import download_object
 from fl_client.utils.minio_loader import upload_dataframe, upload_json, upload_html, download_object
 
-from model_store_interface import DatasetMeta, DatasetPartition
+from model_store_interface import DatasetPartition
+from fl_client.metadata_contract import parse_metadata, variables, documents, evaluation_settings
 from fl_client.data_contract import load_partitions, prepare_partitions
-from fl_client.reporting_policy import utility_reporting_enabled
+from fl_client.reporting_policy import utility_reporting_enabled, full_reporting_enabled
 
 logger = structlog.get_logger()
 
@@ -79,14 +80,19 @@ def load_data(
             f"No dataset paths received for node {global_vars['node_name']}"
         )
 
-    partitions, schema = load_partitions(dataset_paths, download_object)
+    evaluation = json.loads(evaluation_config_json) if evaluation_config_json else None
+    partitions, schema = load_partitions(dataset_paths, download_object, evaluation)
+    if full_reporting_enabled():
+        if not metadata_json or not evaluation_config_json:
+            raise ValueError('Full validation requires the frozen central metadata/evaluation pair')
+        schema = parse_metadata(json.loads(metadata_json), evaluation)
     # Catalogue governance metadata is not a feature schema. Reset per-task state.
     global_vars["model_meta"] = schema
     global_vars["prepared_partitions"] = {}
     if schema is None and metadata_json:
         payload = json.loads(metadata_json)
         if isinstance(payload, dict) and "variables" in payload:
-            global_vars["model_meta"] = DatasetMeta.model_validate(payload)
+            global_vars["model_meta"] = parse_metadata(payload, evaluation)
     global_vars["data_partitions"] = partitions
     global_vars["data"] = partitions["train"]
     global_vars["dataset"] = partitions["train"]
@@ -96,7 +102,9 @@ def load_data(
 def prepare_data(global_vars: dict) -> None:
     learner = global_vars["local_learner"]
     metadata = global_vars.get("model_meta")
-    cfg = (metadata.evaluation or {}).get("aml_utility") if metadata is not None else None
+    cfg = evaluation_settings(metadata).get("aml_utility")
+    if full_reporting_enabled() and not {"train", "val", "test"}.issubset(global_vars["data_partitions"]):
+        raise ValueError("Full reporting requires independent train, val and test partitions from ingestion")
     if utility_reporting_enabled(metadata):
         from fl_client.data_contract import ensure_utility_holdout
         global_vars["data_partitions"] = ensure_utility_holdout(global_vars["data_partitions"], cfg)
@@ -120,10 +128,10 @@ def load_model(global_vars: dict) -> None:
     python_model = model.unwrap_python_model()
     payload = mlflow_client.load_dataset_meta(model)
     if payload is not None:
-        registered_meta = DatasetMeta.model_validate(payload)
+        registered_meta = parse_metadata(payload) if global_vars.get("model_meta") is None else global_vars["model_meta"]
         # Reporting-enabled models define the feature/endpoint contract and
         # holdout policy. Older catalogue metadata must not disable evaluation.
-        if global_vars.get("model_meta") is None or (registered_meta.evaluation or {}).get("aml_utility"):
+        if global_vars.get("model_meta") is None or evaluation_settings(registered_meta).get("aml_utility"):
             global_vars["model_meta"] = registered_meta
     factory = python_model.create_local_learner
     metadata = global_vars.get("model_meta")
@@ -155,7 +163,10 @@ def evaluate_model(global_vars: dict) -> MetricsRecord:
     dataset_meta = global_vars.get("model_meta")
     evaluate = getattr(local_learner, "evaluate")
     if dataset_meta is not None and _accepts_parameter(evaluate, "dataset_meta"):
-        metrics = evaluate(global_vars["data"], dataset_meta)
+        validation = global_vars.get("prepared_partitions", {}).get("val")
+        if validation is None:
+            raise ValueError("Model evaluation requires the validation partition")
+        metrics = evaluate(validation, dataset_meta)
     else:
         metrics = evaluate()
     if not isinstance(metrics, MetricsRecord):
@@ -206,16 +217,18 @@ def generate_synthetic_data(n_samples: int, global_vars: dict, pool_id: str) -> 
     synthetic_data = generator(n_samples, dataset_meta)
     if not isinstance(synthetic_data, pd.DataFrame) or len(synthetic_data) != n_samples:
         raise ValueError("Generator did not return the requested number of synthetic rows")
-    expected = [variable.name for variable in dataset_meta.variables]
+    expected = [variable.name for variable in variables(dataset_meta)]
     if synthetic_data.columns.has_duplicates or not len(synthetic_data.columns):
         raise ValueError("Synthetic data requires unique, nonempty columns")
     if set(synthetic_data.columns) - set(expected):
         raise ValueError("Synthetic data contains columns absent from the model metadata")
     omitted = sorted(set(expected) - set(synthetic_data.columns))
+    if omitted and full_reporting_enabled():
+        raise ValueError("Full validation requires all configured variables in the generated pool")
     if omitted:
         logger.warning("Model did not generate all metadata variables", omitted_variables=omitted)
     expected = [name for name in expected if name in synthetic_data.columns]
-    metadata = dataset_meta.for_publish()
+    metadata, evaluation = documents(dataset_meta)
     source_meta_hash = metadata.pop("meta_hash", None)
     metadata["variables"] = [v for v in metadata["variables"] if v["name"] in expected]
     metadata["use_case"] = global_vars["use_case"]
@@ -224,20 +237,24 @@ def generate_synthetic_data(n_samples: int, global_vars: dict, pool_id: str) -> 
                      "categorical": "Categorical", "binary": "Binary",
                      "datetime": "Datetime", "text": "Text"}
     for variable in metadata["variables"]:
-        variable["datatype"] = storage_types[variable["type"]]
-    evaluation = dict(dataset_meta.evaluation or {})
+        if "datatype" not in variable:
+            variable["datatype"] = storage_types[variable["type"]]
+    evaluation = dict(evaluation)
     evaluation["generation"] = {"omitted_variables": omitted, "validation_performed": False,
                                 "source_meta_hash": source_meta_hash}
     result = publish_pending_pool(
         synthetic_data[expected], metadata, evaluation,
         use_case=global_vars["use_case"], pool_id=pool_id,
     )
-    result["utility_reporting_enabled"] = utility_reporting_enabled(dataset_meta)
+    result["utility_reporting_enabled"] = utility_reporting_enabled(dataset_meta) or full_reporting_enabled()
     return result
 
 
 def validate_synthetic_pool(pool_id: str, object_uri: str, use_case: str,
                             global_vars: dict) -> dict[str, Any]:
+    if full_reporting_enabled():
+        from fl_client.validation_runner import generate_reports
+        return generate_reports(pool_id, object_uri, use_case, global_vars)
     if not utility_reporting_enabled(global_vars.get("model_meta")):
         raise ValueError("Utility reporting is disabled for this deployment or model")
     from fl_client.utils.minio_loader import upload_pool_utility_report

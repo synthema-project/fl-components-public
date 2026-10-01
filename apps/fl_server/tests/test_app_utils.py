@@ -4,8 +4,7 @@ from flwr.server import ServerApp
 from fl_server.utils import app_utils
 
 
-@pytest.mark.asyncio
-async def test_run_server_app():
+def test_run_server_app():
     """Tests that `run_server_app` initializes and runs the FL server correctly."""
     mock_server_app = MagicMock(spec=ServerApp)  # ✅ Mock ServerApp
     superlink_url = "url"
@@ -16,7 +15,7 @@ async def test_run_server_app():
         patch.object(app_utils, "GrpcDriver") as mock_driver,
     ):
         mock_driver_instance = mock_driver.return_value  # ✅ Ensure instance mock
-        await app_utils.run_server_app(
+        app_utils.run_server_app(
             mock_server_app, superlink_url, root_certificates
         )
 

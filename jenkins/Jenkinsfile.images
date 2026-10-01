@@ -2,6 +2,8 @@ pipeline {
     agent { node { label 'jenkins-dev' } }
     options { disableConcurrentBuilds() }
     parameters {
+        choice(name: 'NETWORK_PROFILE', choices: ['AML', 'SCD'], description: 'Disease network; builds the matching full validation image profile')
+        string(name: 'SYNTHEMA_PYPI_CREDENTIALS', defaultValue: '', description: 'Optional username/password credential for the private package index')
         string(name: 'MSI_REPOSITORY', defaultValue: 'https://github.com/synthema-project/app-model_store-interface.git', description: 'MSI source repository')
         string(name: 'MSI_BRANCH', defaultValue: '', description: 'Branch to build, e.g. fl-validation-frozen; build its latest pushed version')
         string(name: 'MSI_GIT_CREDENTIALS', defaultValue: '', description: 'Jenkins Git credential ID, empty for public access')
@@ -10,7 +12,7 @@ pipeline {
         DOCKER_REG = 'harbor.synthema.rid-intrasoft.eu'
         DOCKER_REPO = '/fl/'
         MSI_WHEELS_PREPARED = '1'
-        VALIDATION_PROFILE = 'none'
+        VALIDATION_PROFILE = "${params.NETWORK_PROFILE.toLowerCase()}-full"
     }
     stages {
         stage('Validate inputs') {
@@ -66,10 +68,32 @@ pipeline {
             }
         }
         stage('Build images') {
-            steps { sh 'python3 scripts/images.py --mode build --tag "$CI_IMAGE_TAG" --validation-profile "$VALIDATION_PROFILE"' }
+            steps {
+                script {
+                    def buildImages = { sh 'python3 scripts/images.py --mode build --tag "$CI_IMAGE_TAG" --validation-profile "$VALIDATION_PROFILE"' }
+                    if (params.SYNTHEMA_PYPI_CREDENTIALS.trim()) {
+                        withCredentials([usernamePassword(credentialsId: params.SYNTHEMA_PYPI_CREDENTIALS.trim(),
+                            usernameVariable: 'UV_INDEX_SYNTHEMA_USERNAME', passwordVariable: 'UV_INDEX_SYNTHEMA_PASSWORD')]) {
+                            buildImages()
+                        }
+                    } else { buildImages() }
+                }
+            }
         }
         stage('Unit tests') {
             steps { sh 'python3 scripts/images.py --mode test --tag "$CI_IMAGE_TAG"' }
+        }
+        stage('Offline validation workflow') {
+            steps {
+                sh '''
+                    docker run --rm -e PYTHONPATH=/common:/app/src:/workflow/apps/fl_server/src \
+                        -e MLFLOW_URL=http://localhost -e NODE_NAME=ICH -e RABBIT_HOST=localhost \
+                        -e RABBIT_USERNAME=test -e RABBIT_PASSWORD=test -e DATA_CATALOGUE_URL=http://catalogue \
+                        -e DATA_CATALOGUE_TOKEN=test -e FLWR_TELEMETRY_ENABLED=0 \
+                        -v "$WORKSPACE:/workflow:ro" "synthema-fl-client:$CI_IMAGE_TAG" \
+                        python -m pytest /workflow/e2e/offline -q --import-mode=importlib
+                '''
+            }
         }
         stage('Push images') {
             when { expression { env.FL_SOURCE_BRANCH == 'origin/dev' } }

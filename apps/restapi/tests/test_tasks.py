@@ -14,6 +14,15 @@ from schemas.task import TaskRead, Status
 app = create_app()
 
 
+@pytest.fixture(autouse=True)
+def authenticated_test_user():
+    from restapi.auth import require_authentication, get_mock_user
+    app.dependency_overrides[require_authentication] = get_mock_user
+    yield
+    app.dependency_overrides.pop(require_authentication, None)
+
+
+
 @pytest_asyncio.fixture(scope="session")
 def task_attrs():
     """Provides a valid task attributes dictionary."""
@@ -144,3 +153,33 @@ async def test_cancel_task(async_client, async_session, rabbitmq, task_attrs):
         assert response.status_code == 200
 
         assert rabbitmq[1].publish_message.called_once()
+
+
+@pytest.mark.asyncio
+async def test_full_task_freezes_published_configuration(async_client, async_session, task_attrs, rabbitmq, monkeypatch):
+    import hashlib
+    import json
+    from unittest.mock import Mock
+    monkeypatch.setenv('VALIDATION_PROFILE', 'aml-full')
+    docs = {'metadata': {'use_case': 'AML', 'variables': [{'name': 'age'}]},
+            'evaluation': {'privacy_evaluation': {'differential_privacy': False}}}
+    version = hashlib.sha256(json.dumps(docs, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    rows = [{'use_case': 'AML', 'node': 'ICH', 'collection_id': 'original', 'timestamp': '2026-01-01',
+             'dataset_role': role, 'path': role + '.csv', 'configuration_version': version,
+             'dataset_meta': docs['metadata'], 'evaluation_configuration': docs['evaluation']}
+            for role in ('train', 'val', 'test', 'schema')]
+    def get(url, **kwargs):
+        response = Mock()
+        response.json.return_value = {'datasets': rows} if url.endswith('/metadata') else {'documents': docs}
+        return response
+    monkeypatch.setattr('requests.get', get)
+    payload = {**task_attrs, 'use_case': 'AML', 'selected_nodes': ['ICH'],
+               'validation_snapshot': {'client_supplied': True}}
+    response = await async_client.post('/tasks/', json=payload)
+    assert response.status_code == 200, response.text
+    snapshot = response.json()['validation_snapshot']
+    assert snapshot['nodes']['ICH']['collection_id'] == 'original'
+    assert snapshot['nodes']['ICH']['configuration_version'] == version
+    queued = json.loads(rabbitmq[0].publish_message.call_args.args[0])
+    assert queued['validation_snapshot'] == snapshot
+    assert 'client_supplied' not in snapshot

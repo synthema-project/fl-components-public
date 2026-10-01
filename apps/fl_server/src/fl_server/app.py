@@ -46,6 +46,7 @@ async def load_model_and_data(
         task.use_case,
         config.global_vars.get("metadata_documents"),
         node_names=node_names,
+        **({"dataset_snapshot": getattr(task, "validation_snapshot", None)} if getattr(task, "validation_snapshot", None) else {}),
     )
     requires.load_model(driver, node_ids, task.model_name, task.model_version)
     requires.prepare_data(driver, node_ids)
@@ -97,6 +98,9 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
         return
     logger.info("Task started", task_id=task.id, num_synthetic_samples=task.num_synthetic_samples) 
 
+    import os
+    if os.getenv('VALIDATION_PROFILE') in {'aml-full', 'scd-full'} and not getattr(task, "validation_snapshot", None):
+        raise ValueError('Full validation requires a task configuration snapshot; submit through the updated API')
     node_ids = driver.get_node_ids()
     node_names: dict[int, str] = {}
     filtered_node_ids = requires.filter_clients(
@@ -149,6 +153,7 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
                 task.use_case,
                 task.model_name,
                 node_names=node_names,
+                **({"dataset_snapshot": getattr(task, "validation_snapshot", None), "task_id": task.id} if getattr(task, "validation_snapshot", None) else {}),
             )
 
         requires.clean_config(driver, filtered_node_ids)

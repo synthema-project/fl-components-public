@@ -1,3 +1,6 @@
+import asyncio
+import os
+import requests
 from typing import Sequence
 from fastapi import APIRouter, Response, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -62,6 +65,35 @@ async def create_task(
     current_user: UserClaims = Depends(require_authentication),
 ) -> TaskRead:
     try:
+        # Ignore client-supplied snapshots: resolve and persist server-side at submission.
+        task.validation_snapshot = None
+        profile = os.getenv('VALIDATION_PROFILE', 'none')
+        if profile in {'aml-full', 'scd-full'}:
+            if task.use_case.lower() + '-full' != profile:
+                raise HTTPException(422, 'Task disease does not match the deployed validation profile')
+            from interfaces.catalogue_auth import catalogue_headers
+            from interfaces.dataset_snapshot import select_snapshot
+            def freeze():
+                response = requests.get(config.DATA_CATALOGUE_URL.rstrip('/') + '/metadata',
+                                        headers=catalogue_headers(), timeout=30)
+                response.raise_for_status()
+                snapshot = select_snapshot(response.json().get('datasets', []), task.use_case, task.selected_nodes)
+                entry = next(iter(snapshot['nodes'].values()))
+                published = requests.get(config.DATA_CATALOGUE_URL.rstrip('/') + '/evaluation-configurations/' + task.use_case,
+                    params={'version': entry['configuration_version']}, headers=catalogue_headers(), timeout=30)
+                published.raise_for_status()
+                if published.json().get('documents') != entry['documents']:
+                    raise ValueError('Dataset configuration does not match the published central version')
+                privacy = entry['documents']['evaluation']['privacy_evaluation']
+                if privacy['differential_privacy'] != (task.dp_mode not in (None, 'None')):
+                    raise ValueError('Task DP mode does not match the frozen privacy configuration')
+                return snapshot
+            try:
+                task.validation_snapshot = await asyncio.to_thread(freeze)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+            except (requests.RequestException, RuntimeError) as error:
+                raise HTTPException(503, 'Unable to freeze dataset configuration from catalogue') from error
         db_task = TaskRead.model_validate(task)
         session.add(db_task)
         await session.commit()

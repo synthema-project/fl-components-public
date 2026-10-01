@@ -16,6 +16,7 @@ from fl_server.schemas.task import TaskRead
 @pytest.fixture
 def task():
     return TaskRead(
+        num_synthetic_samples=25,
         user_id="user_id",
         use_case="use_case",
         model_name="model_name",
@@ -114,8 +115,7 @@ async def test_execute_training_loop(driver, node_ids, parameters):
 
 
 
-@pytest.mark.asyncio
-async def test_federated_server_app(task, driver, node_ids, parameters):
+def test_federated_server_app(task, driver, node_ids, parameters):
     """Tests that the `FederatedServerApp` executes correctly."""
     context = MagicMock()
     filtered_node_ids = [2, 3]
@@ -163,7 +163,7 @@ async def test_federated_server_app(task, driver, node_ids, parameters):
         assert hasattr(app, "_main"), "FederatedServerApp must define `_main`"
         assert callable(app._main), "FederatedServerApp._main should be callable"
 
-        await asyncio.to_thread(app._main, driver, context)
+        app._main(driver, context)
 
         mock_filter_clients.assert_called_once_with(driver, node_ids, task.use_case, task.selected_nodes, {})
         mock_mlflow_config.assert_called_once_with(task, driver, filtered_node_ids)

@@ -24,7 +24,9 @@ class TaskBase(SQLModel):
     user_id: str = Field(nullable=False)
     # dataset_uris: List[str] = Field(default=None, sa_column=Column(ARRAY(String())))
     use_case: str = Field(nullable=False)
+    dataset_meta_json: Optional[str] = None
     selected_nodes: Optional[list[str]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    validation_snapshot: Optional[dict] = None
     model_name: str = Field(nullable=False)
     model_version: int = Field(nullable=False)
     num_global_iterations: int = Field(nullable=False)

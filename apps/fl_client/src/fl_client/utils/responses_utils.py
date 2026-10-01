@@ -56,10 +56,12 @@ def create_synthetic_data_response(
 def create_validation_response(msg: Message, result: dict) -> Message:
     import json
     return msg.create_reply(content=RecordSet(configs_records={
-        "config": ConfigsRecord({"success": True, "message": "AML utility report uploaded"}),
+        "config": ConfigsRecord({"success": True, "message": "Validation reports uploaded"}),
         "validation": ConfigsRecord({
-            "node_name": result["node_name"], "report_uri": result["report_uri"],
-            "metrics_json": json.dumps(result["metrics"]),
+            "node_name": result["node_name"],
+            "reports_json": json.dumps(result.get("reports", [])),
+            "report_uri": result.get("report_uri", ""),
+            "metrics_json": json.dumps(result.get("metrics", {})),
         }),
     }), ttl=DEFAULT_TTL)
 

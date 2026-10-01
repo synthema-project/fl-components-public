@@ -1,3 +1,4 @@
+from interfaces.catalogue_auth import catalogue_headers
 import requests
 import json
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,7 +11,7 @@ class DataCatalogueClient:
 
     @property
     def headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        return catalogue_headers(self.token)
 
     def get_use_case_datasets(self, use_case: str) -> Dict[str, Any]:
         """
@@ -28,6 +29,31 @@ class DataCatalogueClient:
         records = [r for r in records_response.json().get("datasets", [])
                    if r.get("use_case") == use_case]
         typed: Dict[str, Dict[str, str]] = {}
+        self.selected_documents = {}
+        groups = {}
+        for record in records:
+            if record.get("collection_id"):
+                key = (record["node"], record["collection_id"])
+                groups.setdefault(key, []).append(record)
+        # Never assemble a dataset from partitions of different uploads.
+        latest = {}
+        for (node, collection), rows in groups.items():
+            roles = {row.get("dataset_role"): row for row in rows}
+            if not {"train", "val", "test", "schema"}.issubset(roles):
+                continue  # Incomplete uploads are not selectable.
+            stamp = max(str(row.get("timestamp", "")) for row in rows)
+            if node not in latest or stamp > latest[node][0]:
+                latest[node] = (stamp, roles)
+        if groups:
+            for node, (_, roles) in latest.items():
+                typed[node] = {role: roles[role]["path"] for role in ("train", "val", "test", "schema")}
+                versions = {row.get("configuration_version") for row in roles.values()}
+                if len(versions) != 1 or None in versions:
+                    raise ValueError("Dataset partitions do not share a configuration version")
+                row = roles["train"]
+                self.selected_documents[node] = (
+                    json.dumps(row["dataset_meta"]), json.dumps(row["evaluation_configuration"]))
+            return typed
         for record in records:
             role = record.get("dataset_role")
             if role in {"train", "val", "test", "schema"}:
@@ -81,6 +107,8 @@ class DataCatalogueClient:
         evaluation_uri: str | None = None,
         token: str,
         validation_nodes: list[str] | None = None,
+        dataset_snapshot: dict | None = None,
+        task_id: int | None = None,
     ) -> dict[str, Any]:
         """Register a generated object in the catalogue approval queue."""
         response = requests.post(
@@ -90,6 +118,8 @@ class DataCatalogueClient:
                 "pool_id": pool_id,
                 "validation_phase": "awaiting_reports",
                 "validation_nodes": validation_nodes or [],
+                "dataset_snapshot": dataset_snapshot,
+                "task_id": task_id,
                 "node_name": node_name,
                 "n_samples": n_samples,
                 "s3_uris": {
@@ -98,7 +128,7 @@ class DataCatalogueClient:
                     **({"evaluation_configuration": evaluation_uri} if evaluation_uri else {}),
                 },
             },
-            headers={"Authorization": f"Bearer {token}"},
+            headers=self.headers,
         )
         response.raise_for_status()
         return response.json()

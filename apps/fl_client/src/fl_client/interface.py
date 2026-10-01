@@ -160,7 +160,7 @@ def set_run_config_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_success_response(msg, "set run config successfully")
 
 def clean_config_if(msg: Message) -> Message:
-    stages.clean_current_config(msg.content.configs_records["config"].get("status", "FINISHED"))
+    stages.clean_current_config(msg.content.configs_records.get("config", {}).get("status", "FINISHED"))
     return responses_utils.create_success_response(msg, "cleaned config successfully")
 
 def filter_clients_if(msg: Message, global_vars: dict) -> Message:
