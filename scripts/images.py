@@ -187,6 +187,9 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
     for key, value in build_args.items():
         cmd += ["--build-arg", f"{key}={value}"]
     if image_def.get('msi'):
+        from package_indexes import package_indexes
+        for key, value in package_indexes(os.environ).items():
+            cmd += ['--build-arg', f'{key}={value}']
         for secret_id, variable in [('synthema_username', 'UV_INDEX_SYNTHEMA_USERNAME'),
                                     ('synthema_password', 'UV_INDEX_SYNTHEMA_PASSWORD')]:
             if os.getenv(variable):

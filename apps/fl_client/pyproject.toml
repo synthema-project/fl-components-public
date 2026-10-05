@@ -88,11 +88,21 @@ name = "synthema"
 url = "https://pypi.synthema.rid-intrasoft.eu/simple/"
 explicit = true
 
+[[tool.uv.index]]
+name = "validation"
+url = "https://pypi.synthema.rid-intrasoft.eu/simple/"
+explicit = true
+
+[[tool.uv.index]]
+name = "privacy"
+url = "https://pypi.synthema.rid-intrasoft.eu/simple/"
+explicit = true
+
 [tool.uv.sources]
-synth-privacy = { index = "synthema" }
+synth-privacy = { index = "privacy" }
 sd-fidelity = { index = "synthema" }
-aml-u = { index = "synthema" }
-scd-u = { index = "synthema" }
+aml-u = { index = "validation" }
+scd-u = { index = "validation" }
 
 [project.optional-dependencies]
 aml-full = ["model-store-interface[aml]==0.5.0"]

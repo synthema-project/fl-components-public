@@ -25,9 +25,16 @@ ENV UV_FIND_LINKS=/wheels
 # Resolve MSI from the exact validated wheel, including a version newer than
 # the compatibility baseline declared in pyproject.toml.
 RUN python -c "from pathlib import Path; import json; w=list(Path('/wheels').glob('model_store_interface-*.whl')); assert len(w)==1; p=Path('pyproject.toml'); p.write_text(p.read_text()+'\n[tool.uv]\noverride-dependencies = '+json.dumps(['model-store-interface @ '+w[0].as_uri()])+'\n')"
+ARG VALIDATION_PYPI_URL=https://pypi.synthema.rid-intrasoft.eu/simple/
+ARG PRIVACY_PYPI_URL=https://pypi.synthema.rid-intrasoft.eu/simple/
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=synthema_username,env=UV_INDEX_SYNTHEMA_USERNAME \
     --mount=type=secret,id=synthema_password,env=UV_INDEX_SYNTHEMA_PASSWORD \
+    --mount=type=secret,id=synthema_username,env=UV_INDEX_VALIDATION_USERNAME \
+    --mount=type=secret,id=synthema_password,env=UV_INDEX_VALIDATION_PASSWORD \
+    --mount=type=secret,id=synthema_username,env=UV_INDEX_PRIVACY_USERNAME \
+    --mount=type=secret,id=synthema_password,env=UV_INDEX_PRIVACY_PASSWORD \
+    export UV_INDEX_VALIDATION_URL="$VALIDATION_PYPI_URL" UV_INDEX_PRIVACY_URL="$PRIVACY_PYPI_URL"; \
     uv sync --no-install-project --group dev
 
 FROM ${BASE_IMAGE}:${CURRENT_VERSION} as runtime
