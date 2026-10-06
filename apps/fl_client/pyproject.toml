@@ -101,8 +101,8 @@ explicit = true
 [tool.uv.sources]
 synth-privacy = { index = "privacy" }
 sd-fidelity = { index = "synthema" }
-aml-u = { index = "validation" }
-scd-u = { index = "validation" }
+safe-validation = { index = "validation" }
+sd-metrics = { index = "validation" }
 
 [project.optional-dependencies]
 aml-full = ["model-store-interface[aml]==0.5.0"]

@@ -3,7 +3,7 @@ pipeline {
     options { disableConcurrentBuilds() }
     parameters {
         choice(name: 'NETWORK_PROFILE', choices: ['AML', 'SCD'], description: 'Disease network; builds the matching full validation image profile')
-        string(name: 'VALIDATION_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'PyPI simple index URL providing aml-u/scd-u; omit credentials from the URL')
+        string(name: 'VALIDATION_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'PyPI simple index URL providing safe-validation/sd-metrics; omit credentials from the URL')
         string(name: 'PRIVACY_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'PyPI simple index URL providing synth-privacy; omit credentials from the URL')
         string(name: 'SYNTHEMA_PYPI_USERNAME', defaultValue: '', description: 'Shared PyPI username for validation, privacy and fidelity; empty for anonymous access')
         password(name: 'SYNTHEMA_PYPI_PASSWORD', defaultValue: '', description: 'Shared PyPI password; leave both PyPI inputs empty for anonymous access')
