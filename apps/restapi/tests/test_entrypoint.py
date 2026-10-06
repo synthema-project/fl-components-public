@@ -32,6 +32,8 @@ async def check():
     # ASGITransport does not start lifespan, so RabbitMQ/Postgres stay untouched.
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
         assert (await client.get('/')).status_code == 200
+        response = await client.post('/api/v1/models/upload')
+        assert response.status_code == 401, response.text
         for path in ('/tasks/', '/mlflow/registered-models/list'):
             response = await client.get(path)
             assert response.status_code == 401, (path, response.text)
