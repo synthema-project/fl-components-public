@@ -5,10 +5,11 @@ pipeline {
         choice(name: 'NETWORK_PROFILE', choices: ['AML', 'SCD'], description: 'Disease network; builds the matching full validation image profile')
         string(name: 'VALIDATION_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'PyPI simple index URL providing aml-u/scd-u; omit credentials from the URL')
         string(name: 'PRIVACY_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'PyPI simple index URL providing synth-privacy; omit credentials from the URL')
-        string(name: 'SYNTHEMA_PYPI_CREDENTIALS', defaultValue: '', description: 'Optional shared Jenkins username/password credential ID for validation, privacy and fidelity indexes')
+        string(name: 'SYNTHEMA_PYPI_USERNAME', defaultValue: '', description: 'Shared PyPI username for validation, privacy and fidelity; empty for anonymous access')
+        password(name: 'SYNTHEMA_PYPI_PASSWORD', defaultValue: '', description: 'Shared PyPI password; leave both PyPI inputs empty for anonymous access')
         string(name: 'MSI_REPOSITORY', defaultValue: 'https://github.com/synthema-project/app-model_store-interface.git', description: 'MSI source repository')
         string(name: 'MSI_BRANCH', defaultValue: '', description: 'Branch to build, e.g. fl-validation-frozen; build its latest pushed version')
-        string(name: 'MSI_GIT_CREDENTIALS', defaultValue: '', description: 'Jenkins Git credential ID, empty for public access')
+        password(name: 'MSI_GITHUB_TOKEN', defaultValue: '', description: 'GitHub token with read access to the MSI repository; empty for public access')
     }
     environment {
         DOCKER_REG = 'harbor.synthema.rid-intrasoft.eu'
@@ -20,7 +21,16 @@ pipeline {
         stage('Validate inputs') {
             steps {
                 script {
-                    sh 'python3 scripts/package_indexes.py'
+                    sh '''
+                        set +x
+                        set -eu
+                        python3 scripts/package_indexes.py
+                        python3 - <<'PYINPUT'
+import os
+if bool(os.environ.get('SYNTHEMA_PYPI_USERNAME', '').strip()) != bool(os.environ.get('SYNTHEMA_PYPI_PASSWORD', '')):
+    raise SystemExit('Supply both PyPI username and password, or leave both empty')
+PYINPUT
+                    '''
                     env.FL_SOURCE_BRANCH = env.GIT_BRANCH ?: ''
                     def branches = [params.MSI_BRANCH]
                     for (value in branches) {
@@ -40,19 +50,13 @@ pipeline {
         stage('Check out package sources') {
             steps {
                 script {
-                    def fetchSource = { folder, repository, branchInput, credential ->
-                        def branch = branchInput.trim()
-                        dir(folder) {
-                            deleteDir()
-                            def remote = [url: repository]
-                            if (credential?.trim()) { remote.credentialsId = credential.trim() }
-                            remote.refspec = "+refs/heads/${branch}:refs/remotes/origin/${branch}"
-                            checkout([$class: 'GitSCM', branches: [[name: "origin/${branch}"]],
-                                      userRemoteConfigs: [remote], extensions: []])
-                            return sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-                        }
+                    dir('.ci-sources/msi') {
+                        deleteDir()
+                        env.MSI_RESOLVED_COMMIT = sh(
+                            script: 'python3 "$WORKSPACE/scripts/checkout_msi.py"',
+                            returnStdout: true
+                        ).trim()
                     }
-                    env.MSI_RESOLVED_COMMIT = fetchSource('.ci-sources/msi', params.MSI_REPOSITORY, params.MSI_BRANCH, params.MSI_GIT_CREDENTIALS)
 
                 }
             }
@@ -73,13 +77,13 @@ pipeline {
         stage('Build images') {
             steps {
                 script {
-                    def buildImages = { sh 'python3 scripts/images.py --mode build --tag "$CI_IMAGE_TAG" --validation-profile "$VALIDATION_PROFILE"' }
-                    if (params.SYNTHEMA_PYPI_CREDENTIALS.trim()) {
-                        withCredentials([usernamePassword(credentialsId: params.SYNTHEMA_PYPI_CREDENTIALS.trim(),
-                            usernameVariable: 'UV_INDEX_SYNTHEMA_USERNAME', passwordVariable: 'UV_INDEX_SYNTHEMA_PASSWORD')]) {
-                            buildImages()
-                        }
-                    } else { buildImages() }
+                    sh '''
+                        set +x
+                        set -eu
+                        export UV_INDEX_SYNTHEMA_USERNAME="$SYNTHEMA_PYPI_USERNAME"
+                        export UV_INDEX_SYNTHEMA_PASSWORD="$SYNTHEMA_PYPI_PASSWORD"
+                        python3 scripts/images.py --mode build --tag "$CI_IMAGE_TAG" --validation-profile "$VALIDATION_PROFILE"
+                    '''
                 }
             }
         }
