@@ -31,7 +31,8 @@ class LocalDriver:
             mode = msg.content.configs_records['config'].get('mode', msg.metadata.message_type)
             self.modes.append(mode)
             try:
-                handler = client.train if msg.metadata.message_type == 'train' else client.query
+                handler = {'train': client.train, 'evaluate': client.evaluate}.get(
+                    msg.metadata.message_type, client.query)
                 response = handler(msg, Context(state=RecordSet()))
             except Exception as error:
                 response = msg.create_error_reply(Error(2, str(error)))
@@ -55,13 +56,13 @@ def test_frozen_full_validation_flow(tmp_path, monkeypatch):
                 for role, path in paths.items()]
     snapshot = select_snapshot(records, 'AML', ['ICH'])
     task = TaskRead(user_id='test', id=1, use_case='AML', selected_nodes=['ICH'],
-        model_name='test', model_version=1, num_global_iterations=2, run_name='offline',
+        SMPC_enabled=False, model_name='test', model_version=1, num_global_iterations=2, run_name='offline',
         experiment_name='offline', num_synthetic_samples=25, validation_snapshot=snapshot)
     driver = LocalDriver()
     client.global_vars.update(node_name='ICH', use_case='AML', model_meta=None, SMPC_enabled=False, dp_config=None)
     m = model()
     def evaluator(**kwargs):
-        assert len(kwargs['real_data']) == 72
+        assert len(kwargs['real_data']) == 96
         assert len(kwargs['holdout_data']) == 24
         assert len(kwargs['synth_data']) == 25
         (Path(kwargs['output_folder']) / 'report.html').write_text('<html>Artificial evaluator result</html>')

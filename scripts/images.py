@@ -44,20 +44,12 @@ Examples:
 
 import argparse
 import json
-import re
-import shutil
 import subprocess
 from pathlib import Path
 import docker
 from docker.errors import ImageNotFound, APIError, BuildError
 import os
 os.environ["DOCKER_BUILDKIT"] = "1"
-
-# Local checkout of the model-store-interface package (a sibling of the repo root).
-# It cannot be reached from a Docker build context, so we build its wheel and vendor
-# it into each context that needs it (see prepare_msi_wheel / Dockerfile UV_FIND_LINKS).
-MSI_DIRNAME = "app-model_store-interface"
-
 
 # ------------------------------------------------------------------------------
 # Parse Arguments
@@ -74,7 +66,7 @@ def parse_args():
     parser.add_argument(
         "--tag", type=str, help="Tag for the images (or tag to remove)."
     )
-    parser.add_argument("--validation-profile", choices=["none", "aml", "aml-full", "scd-full"], default="none")
+    parser.add_argument("--validation-profile", choices=["none", "aml-full", "scd-full"], default="none")
     parser.add_argument(
         "--registry", type=str, help="Registry prefix (required for push)."
     )
@@ -112,54 +104,6 @@ def get_context_path(root_dir, image_path):
 
 
 # ------------------------------------------------------------------------------
-# model-store-interface wheel vendoring
-# ------------------------------------------------------------------------------
-def _wheel_version(path):
-    """Sort key: parse the version tuple out of a model_store_interface-X.Y.Z wheel name."""
-    m = re.search(r"model_store_interface-([0-9]+(?:\.[0-9]+)*)", path.name)
-    return tuple(int(x) for x in m.group(1).split(".")) if m else (0,)
-
-
-def prepare_msi_wheel(root_dir, context_path):
-    """Build the model-store-interface wheel and vendor it into the build context.
-
-    The Docker build context cannot reach the sibling ``app-model_store-interface``
-    repo, so we build its wheel and copy it into ``<context>/wheels/`` where the
-    Dockerfile installs it via ``UV_FIND_LINKS`` during ``uv sync``.
-    """
-    if os.getenv("MSI_WHEELS_PREPARED") == "1":
-        # Release CI has already inspected and staged exact wheel artifacts.
-        return len(list((context_path / "wheels").glob("model_store_interface-*.whl"))) == 1
-    interface_dir = (root_dir.parent / MSI_DIRNAME).resolve()
-    wheels_dir = context_path / "wheels"
-
-    if not interface_dir.exists():
-        print("[ERROR] MSI source checkout is missing. Build verified source wheels first; deprecated vendored wheels are not a fallback.")
-        return False
-
-    print("[INFO] Building model-store-interface wheel...")
-    if subprocess.run(["uv", "build", "--wheel"], cwd=str(interface_dir)).returncode != 0:
-        print("[ERROR] Failed to build model-store-interface wheel")
-        return False
-
-    built = sorted(
-        (interface_dir / "dist").glob("model_store_interface-*.whl"),
-        key=_wheel_version,
-    )
-    if not built:
-        print("[ERROR] No model-store-interface wheel found after build")
-        return False
-
-    latest = built[-1]
-    wheels_dir.mkdir(exist_ok=True)
-    for stale in wheels_dir.glob("model_store_interface-*.whl"):
-        stale.unlink()
-    shutil.copy2(latest, wheels_dir / latest.name)
-    print(f"[OK] Vendored {latest.name} into {wheels_dir}")
-    return True
-
-
-# ------------------------------------------------------------------------------
 # Docker Operations
 # ------------------------------------------------------------------------------
 def build_image(client, image_def, image_tag, root_dir, base_image=None):
@@ -171,11 +115,6 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
     path = get_context_path(root_dir, image_def["path"])
     full_tag = f"{image_def['name']}:{image_tag}"
 
-    # Images that depend on model-store-interface need its wheel vendored into the context.
-    if image_def.get("msi"):
-        if not prepare_msi_wheel(root_dir, path):
-            return False
-
     build_args = {"CURRENT_VERSION": image_tag} if image_def.get("buildargs") else {}
     if base_image:
         build_args["BASE_IMAGE"] = base_image
@@ -186,7 +125,7 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
     cmd = ["docker", "build", "--rm", "--platform", "linux/amd64", "-t", full_tag]
     for key, value in build_args.items():
         cmd += ["--build-arg", f"{key}={value}"]
-    if image_def.get('msi'):
+    if image_def.get('buildargs') or image_def.get('msi'):
         from package_indexes import package_indexes
         for key, value in package_indexes(os.environ).items():
             cmd += ['--build-arg', f'{key}={value}']
@@ -194,7 +133,7 @@ def build_image(client, image_def, image_tag, root_dir, base_image=None):
                                     ('synthema_password', 'UV_INDEX_SYNTHEMA_PASSWORD')]:
             if os.getenv(variable):
                 cmd += ['--secret', f'id={secret_id},env={variable}']
-    cmd.append(str(path))
+    cmd += ["--file", str(path / "Dockerfile"), str(root_dir)]
 
     env = {**os.environ, "DOCKER_BUILDKIT": "1"}
     result = subprocess.run(cmd, env=env)
@@ -314,6 +253,9 @@ def handle_build(client, config, tag, root_dir):
     if not tag:
         print("[ERROR] --tag is required for building images.")
         return False
+    if not (root_dir / "uv.lock").exists():
+        print("[ERROR] Missing uv.lock. Run python3 scripts/lock_dependencies.py with index access first.")
+        return False
     base_image_def = config["images"][0]
     dependent_images = config["images"][1:]
 
@@ -352,8 +294,6 @@ def handle_remove(client, config):
 # ------------------------------------------------------------------------------
 def main():
     args = parse_args()
-    if args.validation_profile == "scd":
-        raise SystemExit("SCD reporting is not implemented; select aml or none")
     os.environ["VALIDATION_PROFILE"] = args.validation_profile
     config_file = Path(__file__).resolve().parent / "docker_config.json"
     config = load_config(config_file)

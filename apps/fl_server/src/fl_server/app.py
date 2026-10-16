@@ -1,10 +1,10 @@
 import asyncio
-from typing import cast
 import structlog
 from flwr.common import Context, ParametersRecord
 from flwr.server import Driver, ServerApp
 
 from fl_server import requires, stages, config
+from interfaces.privacy import scalar_metrics
 from fl_server.utils import mlflow_utils
 from fl_server.interfaces import mlflow_client
 from fl_server.schemas.task import TaskRead
@@ -48,7 +48,9 @@ async def load_model_and_data(
         node_names=node_names,
         **({"dataset_snapshot": getattr(task, "validation_snapshot", None)} if getattr(task, "validation_snapshot", None) else {}),
     )
-    requires.load_model(driver, node_ids, task.model_name, task.model_version)
+    requires.execute_step_zero(driver, node_ids, config.global_vars)
+    applied = requires.exchange_custom_metadata(driver, node_ids, config.global_vars)
+    logger.info("Custom metadata exchange completed", applied=applied)
     requires.prepare_data(driver, node_ids)
 
 async def set_SMPC_enabled(
@@ -72,9 +74,11 @@ async def execute_training_loop(
     n_global_iter: int,
 ) -> ParametersRecord:
     """Return the final aggregate for subsequent rounds and model upload."""
+    if type(n_global_iter) is not int or n_global_iter < 1:
+        raise ValueError("num_global_iterations must be a positive integer")
     for iteration in range(n_global_iter):
         results = requires.train_model(
-            driver, node_ids, parameters, current_global_iter=iteration
+            driver, node_ids, parameters, current_global_iter=iteration, max_round=n_global_iter
         )
         aggregated_parameters = stages.aggregate_parameters(
             [r[0] for r in results], config.global_vars
@@ -82,8 +86,18 @@ async def execute_training_loop(
         aggregated_metrics = stages.aggregate_metrics(
             [r[1] for r in results], config.global_vars
         )
-        mlflow_client.log_metrics(cast(dict, aggregated_metrics), step=iteration)
+        mlflow_client.log_metrics({**scalar_metrics(aggregated_metrics), "fl/current_round": iteration + 1, "fl/max_round": n_global_iter}, step=iteration)
         requires.set_parameters(driver, node_ids, aggregated_parameters)
+        evaluation = requires.evaluate_model(
+            driver, node_ids, aggregated_parameters,
+            current_global_iter=iteration, max_round=n_global_iter,
+        )
+        if evaluation:
+            evaluation_metrics = stages.aggregate_metrics(evaluation, config.global_vars)
+            mlflow_client.log_metrics(
+                {f"eval/{key}": value for key, value in scalar_metrics(evaluation_metrics).items()},
+                step=iteration,
+            )
         parameters = aggregated_parameters
     return parameters
 
@@ -107,6 +121,11 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
         driver, node_ids, task.use_case, task.selected_nodes, node_names
     )
 
+    if not filtered_node_ids:
+        raise ValueError('Training requires at least one participating client')
+    if task.SMPC_enabled and len(filtered_node_ids) < 2:
+        raise ValueError('SMPC training requires at least two participating clients')
+
     try:
         logger.info("Configuring MLflow")
         await configure_mlflow(task, driver, filtered_node_ids)
@@ -114,8 +133,9 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
         logger.info("Loading model and data")
         await load_model_and_data(task, driver, filtered_node_ids, node_names)
 
+        # Reset both server and clients on every task, including after a legacy run.
+        await set_SMPC_enabled(task, driver, filtered_node_ids)
         if task.SMPC_enabled:
-            await set_SMPC_enabled(task, driver, filtered_node_ids)
             port = config.P2P_PORT
             logger.info("Starting P2P servers")
             requires.start_P2P_server(driver, filtered_node_ids, port)
@@ -126,9 +146,8 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
             logger.info("Establishing P2P network")
             requires.connect_peers(driver, filtered_node_ids, discovered_peers)
 
-        if task.dp_mode:
-            logger.info(f"Configuring DP {task.dp_mode} with clipping norm {task.clipping_norm} and noise multiplier {task.noise_multiplier}")
-            await set_dp_config(task, driver, filtered_node_ids)
+        # Configure or clear the existing optional platform DP on every task.
+        await set_dp_config(task, driver, filtered_node_ids)
 
         logger.info("Getting initial parameters")
         parameters = requires.get_parameters_from_one_node(driver,
@@ -140,6 +159,19 @@ async def server_main(task: TaskRead, driver: Driver, context: Context,
         logger.info("Starting training loop")
         parameters = await execute_training_loop(driver, filtered_node_ids, parameters,
                                     task.num_global_iterations)
+
+        privacy = requires.collect_privacy_budgets(driver, filtered_node_ids)
+        config.global_vars['privacy_result'] = privacy
+        privacy_metrics = {
+            'privacy/reported_nodes': privacy['reported_nodes'],
+            'privacy/total_nodes': privacy['total_nodes'],
+            'privacy/budget_complete': int(privacy['complete']),
+        }
+        if 'model_reported_budget' in privacy:
+            privacy_metrics.update({f'privacy/model_reported_{key}': value
+                                    for key, value in privacy['model_reported_budget'].items()})
+        mlflow_client.log_metrics(privacy_metrics, step=task.num_global_iterations - 1)
+        logger.info('Model privacy budget collection completed', **privacy)
 
         logger.info("Uploading trained model")
         requires.upload_model(driver, filtered_node_ids, parameters)

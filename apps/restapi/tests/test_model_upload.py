@@ -11,7 +11,7 @@ import yaml
 
 from restapi.auth import get_mock_user, require_authentication
 from restapi.helpers import model_upload
-from restapi.routers import models
+from restapi.routers import models, mlflow_router
 
 
 def files():
@@ -42,14 +42,14 @@ def archive(contents=None, special=None, prefix=''):
 
 def client(authenticated=True):
     app = FastAPI()
-    app.include_router(models.router)
+    app.include_router(mlflow_router.router)
     if authenticated:
         app.dependency_overrides[require_authentication] = get_mock_user
     return TestClient(app)
 
 
 def post(c, bundle, **changes):
-    return c.post('/api/v1/models/upload',
+    return c.post('/mlflow/models/upload',
         data={'experiment_name': 'test', 'use_case': 'AML', 'trained': 'false',
               'model_name': 'demo', 'aggregator_name': 'AVG', **changes},
         files={'bundle': ('model.tar.gz', bundle, 'application/gzip')})
@@ -237,3 +237,105 @@ def test_deleted_experiment_rejected_before_artifact_upload(tmp_path, monkeypatc
                                      'demo', 'AVG', 'user', {})
     assert error.value.status_code == 409
     backend.create_run.assert_not_called()
+
+
+def test_mlflow_router_exposes_authenticated_upload(monkeypatch):
+    from restapi.routers.mlflow_router import router
+    app = FastAPI()
+    app.include_router(router)
+    monkeypatch.setattr('restapi.auth.AUTH_DISABLE_TESTS', False)
+    with TestClient(app) as api:
+        assert api.post('/mlflow/models/upload', data={'experiment_name': 'test', 'use_case': 'AML',
+            'model_name': 'demo', 'aggregator_name': 'AVG'},
+            files={'bundle': ('model.tar.gz', archive(), 'application/gzip')}).status_code == 401
+    app.dependency_overrides[require_authentication] = get_mock_user
+    register = Mock(return_value={'model_uri': 'models:/demo/1', 'model_version': '1'})
+    monkeypatch.setattr(models, 'register_bundle', register)
+    with TestClient(app) as api:
+        response = api.post('/mlflow/models/upload', data={'experiment_name': 'test', 'use_case': 'AML',
+            'model_name': 'demo', 'aggregator_name': 'AVG'},
+            files={'bundle': ('model.tar.gz', archive(), 'application/gzip')})
+    assert response.status_code == 201, response.text
+    register.assert_called_once()
+
+
+def test_msi_submission_gmm_round_trip_through_mlflow_router(tmp_path, monkeypatch):
+    import mlflow
+    from restapi import config
+    from restapi.routers.mlflow_router import router
+    workspace = Path(__file__).resolve().parents[4]
+    source = workspace / 'app-model_store-interface'
+    monkeypatch.syspath_prepend(str(source / 'src'))
+    monkeypatch.syspath_prepend(str(source / 'examples/01-core-simulation'))
+    from gmm_model import create_local_learner, create_aggregator
+    from model_store_interface import FederatedModel, submit_fl_model
+    from model_store_interface.publishers import web_service
+    tracking = (tmp_path / 'registry').as_uri()
+    monkeypatch.setattr(config, 'MLFLOW_BASE_URL', tracking)
+    monkeypatch.setattr(config, 'MLFLOW_TRACKING_USERNAME', '')
+    monkeypatch.setattr(config, 'MLFLOW_TRACKING_PASSWORD', '')
+    monkeypatch.setattr(web_service, 'KeycloakAuthClient', Mock(return_value=Mock(get_access_token=Mock(return_value='test'))))
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_authentication] = get_mock_user
+    def send(request):
+        with TestClient(app) as api:
+            response = api.post('/mlflow/models/upload', content=request.data, headers=dict(request.header_items()))
+        assert response.status_code == 201, response.text
+        return io.BytesIO(response.content)
+    monkeypatch.setattr(web_service.urllib.request, 'urlopen', send)
+    result = submit_fl_model(
+        model=FederatedModel(create_local_learner=create_local_learner,
+                             create_aggregator=create_aggregator, model_name='roundtrip-gmm'),
+        platform_url='http://testserver', username='test', password='test',
+        experiment_name='msi-roundtrip', use_case='AML', trained=False,
+        metadata_path=str(workspace / 'personal-testing/fixtures/dataset-meta.json'),
+        evaluation_config_path=str(source / 'examples/shared_data/aml_dataset_evaluation_config.json'),
+        license_path=str(source / 'LICENSE'),
+        code_paths=[str(source / 'examples/01-core-simulation/gmm_model.py')],
+        pip_requirements=['mlflow-skinny==2.19.0'],
+    )
+    assert result['model_version'] == '1'
+    client = mlflow.tracking.MlflowClient(tracking_uri=tracking, registry_uri=tracking)
+    saved = client.download_artifacts(result['run_id'], 'model')
+    loaded = mlflow.pyfunc.load_model(saved).unwrap_python_model()
+    assert callable(loaded.create_local_learner().train_round)
+    assert callable(loaded.create_aggregator().aggregate_parameters)
+    assert (Path(saved) / 'artifacts/aml_dataset_evaluation_config.json').exists()
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_proxy_artifacts_use_http_tracking_and_restore_previous_uri(tmp_path, monkeypatch, fail):
+    from types import SimpleNamespace
+    import mlflow
+    from mlflow.store.artifact.mlflow_artifacts_repo import MlflowArtifactsRepository
+    tracking = 'http://mlflow:5000'
+    previous = mlflow.get_tracking_uri()
+    backend = Mock()
+    backend.get_experiment_by_name.return_value = SimpleNamespace(experiment_id='1', lifecycle_stage='active')
+    backend.create_run.return_value = SimpleNamespace(info=SimpleNamespace(
+        run_id='run', artifact_uri='mlflow-artifacts:/1/run/artifacts'))
+    backend.create_model_version.return_value = SimpleNamespace(version='1')
+    def upload(*args, **kwargs):
+        assert mlflow.get_tracking_uri() == tracking
+        resolved = MlflowArtifactsRepository.resolve_uri(
+            'mlflow-artifacts:/1/run/artifacts', mlflow.get_tracking_uri())
+        assert resolved.startswith(tracking + '/api/2.0/mlflow-artifacts/artifacts/')
+        if fail:
+            raise RuntimeError('artifact upload failed')
+    backend.log_artifacts.side_effect = upload
+    monkeypatch.setattr(mlflow.tracking, 'MlflowClient', Mock(return_value=backend))
+    monkeypatch.setattr(model_upload.config, 'MLFLOW_BASE_URL', tracking)
+    monkeypatch.setattr(model_upload.config, 'MLFLOW_TRACKING_USERNAME', '')
+    try:
+        mlflow.set_tracking_uri((tmp_path / 'mlruns').as_uri())
+        local_default = mlflow.get_tracking_uri()
+        if fail:
+            with pytest.raises(RuntimeError, match='artifact upload failed'):
+                model_upload.register_bundle(tmp_path, 'test', 'AML', False, 'demo', 'AVG', 'user', {})
+        else:
+            result = model_upload.register_bundle(tmp_path, 'test', 'AML', False, 'demo', 'AVG', 'user', {})
+            assert result['model_version'] == '1'
+        assert mlflow.get_tracking_uri() == local_default
+    finally:
+        mlflow.set_tracking_uri(previous)

@@ -215,9 +215,9 @@ def create_set_dp_cfg_recordset(
     configsrecord = ConfigsRecord(
         {
             "mode": "set_dp_config",
-            "dp_mode": dp_mode,
-            "clipping_norm": clipping_norm,
-            "noise_multiplier": noise_multiplier,
+            "dp_mode": dp_mode or "None",
+            "clipping_norm": clipping_norm if clipping_norm is not None else 0,
+            "noise_multiplier": noise_multiplier if noise_multiplier is not None else 0,
         }
     )
     return RecordSet(
@@ -245,24 +245,43 @@ def read_set_dp_cfg_recordset(recordset: RecordSet) -> dict:
 
 
 def create_train_model_recordset(
-    parametersrecord: ParametersRecord, current_global_iter: int
+    parametersrecord: ParametersRecord, current_global_iter: int, max_round: int
 ) -> RecordSet:
     return RecordSet(
         parameters_records={"parameters": parametersrecord},
         configs_records={
-            "config": ConfigsRecord({"current_global_iter": current_global_iter})
+            "config": ConfigsRecord({"current_global_iter": current_global_iter, "current_round": current_global_iter + 1, "max_round": max_round})
         },
     )
 
 
-def read_train_model_recordset(recordset: RecordSet) -> tuple[ParametersRecord, int]:
+def read_train_model_recordset(recordset: RecordSet) -> tuple[ParametersRecord, int, int]:
     parameters = recordset.parameters_records["parameters"]
     current_global_iter = recordset.configs_records["config"]["current_global_iter"]
     if not isinstance(current_global_iter, int):
         raise TypeError(
             f"current_global_iter must be an integer, received {type(current_global_iter)}"
         )
-    return parameters, current_global_iter
+    config = recordset.configs_records["config"]
+    max_round = config["max_round"]
+    current_round = config["current_round"]
+    if (type(current_global_iter) is not int or type(max_round) is not int
+            or type(current_round) is not int
+            or current_round != current_global_iter + 1
+            or not 1 <= current_round <= max_round):
+        raise ValueError("Invalid federated round context")
+    return parameters, current_global_iter, max_round
+
+
+def create_evaluate_model_recordset(
+    parametersrecord: ParametersRecord, current_global_iter: int, max_round: int,
+) -> RecordSet:
+    """Evaluation uses the same validated parameter/round contract as training."""
+    return create_train_model_recordset(parametersrecord, current_global_iter, max_round)
+
+
+def read_evaluate_model_recordset(recordset: RecordSet) -> tuple[ParametersRecord, int, int]:
+    return read_train_model_recordset(recordset)
 
 
 def create_clean_config_recordset(status: str = "FINISHED") -> RecordSet:
@@ -289,7 +308,7 @@ def create_discover_peers_recordset(node_ids: list[int], client_port: int, max_d
     configsrecord = ConfigsRecord(
         {
             "mode": "discover_peers",
-            "min_peers": len(node_ids),
+            "min_peers": len(node_ids) - 1,
             "client_port": client_port,
             "max_discovery_time": max_discovery_time
         }
@@ -376,3 +395,22 @@ def read_generate_synthetic_recordset(recordset: RecordSet) -> dict:
         "s3_bucket": s3_bucket,
         "create_s3_bucket_if_missing": create_bucket,
     }
+
+
+def create_custom_metadata_recordset(mode: str, metadata=None) -> RecordSet:
+    records = {"config": ConfigsRecord({"mode": mode})}
+    if metadata is not None:
+        records["custom_metadata"] = metadata
+    return RecordSet(configs_records=records)
+
+
+def create_step_zero_recordset(mode: str, metadata: dict | None = None) -> RecordSet:
+    if mode not in {'compute_step_zero', 'apply_step_zero'}:
+        raise ValueError('Unknown Step 0 mode')
+    return RecordSet(configs_records={'config': ConfigsRecord({
+        'mode': mode, 'metadata_json': json.dumps(metadata, allow_nan=False),
+    })})
+
+
+def create_privacy_budget_recordset() -> RecordSet:
+    return RecordSet(configs_records={'config': ConfigsRecord({'mode': 'get_privacy_budget'})})

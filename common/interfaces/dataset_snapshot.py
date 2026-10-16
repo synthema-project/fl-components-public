@@ -13,9 +13,9 @@ def select_snapshot(records, use_case, nodes):
     selected = {}
     for (node, collection), rows in groups.items():
         roles = {row.get('dataset_role'): row for row in rows}
-        if not {'train', 'val', 'test', 'schema'}.issubset(roles):
+        if not {'train', 'test', 'schema'}.issubset(roles):
             continue
-        rows = [roles[role] for role in ('train', 'val', 'test', 'schema')]
+        rows = [roles[role] for role in ('train', 'test', 'schema')]
         versions = {row.get('configuration_version') for row in rows}
         if len(versions) != 1 or None in versions:
             raise ValueError('Collection partitions have inconsistent configuration versions')
@@ -28,7 +28,7 @@ def select_snapshot(records, use_case, nodes):
             raise ValueError('Collection configuration content does not match its version')
         stamp = max(str(row.get('timestamp', '')) for row in rows)
         entry = {'collection_id': collection, 'configuration_version': version,
-                 'paths': {role: roles[role]['path'] for role in ('train', 'val', 'test', 'schema')},
+                 'paths': {role: roles[role]['path'] for role in ('train', 'test', 'schema')},
                  'documents': documents}
         if node not in selected or (stamp, collection) > selected[node][0]:
             selected[node] = ((stamp, collection), entry)

@@ -77,7 +77,10 @@ def deserialize_parameters(serialized):
     """
     parameters = {}
     for name, info in serialized.items():
-        array = np.frombuffer(info["data"], dtype=np.dtype(info["dtype"])).reshape(info["shape"])
+        if info["stype"] == "numpy.ndarray":
+            array = Array(**info).numpy()
+        else:
+            array = np.frombuffer(info["data"], dtype=np.dtype(info["dtype"])).reshape(info["shape"])
         parameters[name] = array
     return parameters
 

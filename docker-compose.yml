@@ -51,7 +51,8 @@ services:
   # Build the FL client image once
   synthema-fl-client-1:
     build: 
-      context: apps/fl_client
+      context: .
+      dockerfile: apps/fl_client/Dockerfile
       args:
         BASE_IMAGE: fl-common
         CURRENT_VERSION: latest
@@ -118,7 +119,8 @@ services:
   
   synthema-fl-server:
     build: 
-      context: apps/fl_server
+      context: .
+      dockerfile: apps/fl_server/Dockerfile
       args:
         BASE_IMAGE: fl-common
         CURRENT_VERSION: latest
@@ -151,7 +153,8 @@ services:
 
   synthema-fl-restapi:
     build: 
-      context: apps/restapi
+      context: .
+      dockerfile: apps/restapi/Dockerfile
       args:
         BASE_IMAGE: fl-common
         CURRENT_VERSION: latest

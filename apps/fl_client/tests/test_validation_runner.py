@@ -59,3 +59,10 @@ def test_plugin_failure_propagates_before_completion(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match='evaluation failed'):
         runner.evaluate(tmp_path)
     assert not (tmp_path / 'results.json').exists()
+
+
+def test_privacy_uses_real_synth_privacy_entry_point_without_tapas_import(monkeypatch):
+    import sys
+    evaluator = Mock()
+    monkeypatch.setitem(sys.modules, 'synth_privacy', SimpleNamespace(sd_privacy=evaluator))
+    assert runner.validator('privacy', 'AML') is evaluator

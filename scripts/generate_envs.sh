@@ -1,10 +1,5 @@
-#!/bin/bash
-
-# Check if uv is installed
-if ! command -v uv &> /dev/null; then
-    echo "Error: uv is not installed. Please install uv first."
-    exit 1
-fi
-
-echo "Setting up workspace environment..."
-uv sync
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+command -v uv >/dev/null || { echo "Install uv 0.11.19 first." >&2; exit 1; }
+python3 scripts/lock_dependencies.py --sync "$@"

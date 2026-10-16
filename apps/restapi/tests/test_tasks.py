@@ -167,7 +167,7 @@ async def test_full_task_freezes_published_configuration(async_client, async_ses
     rows = [{'use_case': 'AML', 'node': 'ICH', 'collection_id': 'original', 'timestamp': '2026-01-01',
              'dataset_role': role, 'path': role + '.csv', 'configuration_version': version,
              'dataset_meta': docs['metadata'], 'evaluation_configuration': docs['evaluation']}
-            for role in ('train', 'val', 'test', 'schema')]
+            for role in ('train', 'test', 'schema')]
     def get(url, **kwargs):
         response = Mock()
         response.json.return_value = {'datasets': rows} if url.endswith('/metadata') else {'documents': docs}

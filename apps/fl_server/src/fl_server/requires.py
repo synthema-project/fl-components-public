@@ -354,6 +354,7 @@ def train_model(
     node_ids: list[int],
     parametersrecord: ParametersRecord,
     current_global_iter: int,
+    max_round: int,
 ) -> list[tuple[ParametersRecord, MetricsRecord]]:
     all_replies = execution_flow(
         driver=driver,
@@ -361,7 +362,7 @@ def train_model(
         recordset_factory=interfaces.recordset.create_train_model_recordset,
         msg_type=MessageType.TRAIN,
         msg_group="train_model",
-        recordset_factory_args=(parametersrecord, current_global_iter),
+        recordset_factory_args=(parametersrecord, current_global_iter, max_round),
         check_success=True,
     )
 
@@ -372,6 +373,25 @@ def train_model(
         )
         for msg in all_replies
     ]
+
+def evaluate_model(
+    driver: Driver, node_ids: list[int], parametersrecord: ParametersRecord,
+    current_global_iter: int, max_round: int,
+) -> list[MetricsRecord]:
+    replies = execution_flow(
+        driver=driver,
+        node_ids=node_ids,
+        recordset_factory=interfaces.recordset.create_evaluate_model_recordset,
+        msg_type=MessageType.EVALUATE,
+        msg_group="evaluate_model",
+        recordset_factory_args=(parametersrecord, current_global_iter, max_round),
+        check_success=True,
+    )
+    if len(replies) != len(node_ids):
+        raise RuntimeError("Round evaluation requires every client reply")
+    return [msg.content.metrics_records["metrics"] for msg in replies
+            if msg.content.metrics_records["metrics"]]
+
 
 def set_SMPC_enabled(
     driver: Driver,
@@ -462,7 +482,78 @@ def connect_peers(
             msg_type=MessageType.QUERY,
             msg_group="connect_peers",
             recordset_factory_args=([node_id], peers[i]),
+            check_success=True,
         )
         all_replies.extend(partial_replies)
 
     return [msg.content.configs_records['config']['peers'] for msg in all_replies]
+
+
+def exchange_custom_metadata(driver: Driver, node_ids: list[int], global_vars: dict) -> bool:
+    from fl_server.custom_metadata import exchange
+
+    def collect():
+        replies = execution_flow(driver, node_ids, MessageType.QUERY,
+            "compute_custom_metadata", recordset_factory=interfaces.recordset.create_custom_metadata_recordset,
+            recordset_factory_args=("compute_custom_metadata",), check_success=True)
+        if len(replies) != len(node_ids):
+            raise RuntimeError("Custom metadata exchange did not receive every client reply")
+        return [reply.content.configs_records.get("custom_metadata", None) for reply in replies]
+
+    def broadcast(payload):
+        replies = execution_flow(driver, node_ids, MessageType.QUERY,
+            "set_custom_metadata", recordset_factory=interfaces.recordset.create_custom_metadata_recordset,
+            recordset_factory_args=("set_custom_metadata", payload), check_success=True)
+        if len(replies) != len(node_ids):
+            raise RuntimeError("Custom metadata was not acknowledged by every client")
+
+    return exchange(global_vars, collect, broadcast)
+
+
+def execute_step_zero(driver: Driver, node_ids: list[int], global_vars: dict) -> None:
+    """Collect TRAIN summaries, enrich metadata, initialize learners, then return."""
+    from interfaces.step_zero import aggregate
+    replies = execution_flow(
+        driver=driver, node_ids=node_ids, msg_type=MessageType.QUERY,
+        msg_group='compute_step_zero',
+        recordset_factory=interfaces.recordset.create_step_zero_recordset,
+        recordset_factory_args=('compute_step_zero',), check_success=True,
+    )
+    if not node_ids or len(replies) != len(node_ids):
+        raise RuntimeError('Step 0 requires every client reply')
+    metadata = aggregate([json.loads(reply.content.configs_records['step_zero']['payload_json'])
+                          for reply in replies])
+    global_vars['step_zero_metadata'] = metadata
+    replies = execution_flow(
+        driver=driver, node_ids=node_ids, msg_type=MessageType.QUERY,
+        msg_group='apply_step_zero',
+        recordset_factory=interfaces.recordset.create_step_zero_recordset,
+        recordset_factory_args=('apply_step_zero', metadata), check_success=True,
+    )
+    if len(replies) != len(node_ids):
+        raise RuntimeError('Step 0 metadata application requires every client acknowledgement')
+    logger.info('Step 0 completed', clients=len(node_ids), has_metadata=metadata is not None,
+                strategy='PlainStepZeroStrategy')
+
+
+def collect_privacy_budgets(driver: Driver, node_ids: list[int]) -> dict:
+    from interfaces.privacy import budget
+    from model_store_interface.dp.dp_wrappers import FedAvgAccountant
+    replies = execution_flow(
+        driver=driver, node_ids=node_ids, msg_type=MessageType.QUERY,
+        msg_group='get_privacy_budget',
+        recordset_factory=interfaces.recordset.create_privacy_budget_recordset,
+        check_success=True,
+    )
+    if len(replies) != len(node_ids):
+        raise RuntimeError('Privacy budget collection requires every client reply')
+    budgets = [budget(json.loads(reply.content.configs_records['privacy']['budget_json'])) for reply in replies]
+    available = [value for value in budgets if value is not None]
+    result = {'reported_nodes': len(available), 'total_nodes': len(node_ids),
+              'complete': bool(node_ids) and len(available) == len(node_ids)}
+    if result['complete']:
+        accountant = FedAvgAccountant()
+        accountant.update(epsilons=[b['epsilon'] for b in available],
+                          deltas=[b['delta'] for b in available])
+        result['model_reported_budget'] = accountant.get_privacy_spent()
+    return result

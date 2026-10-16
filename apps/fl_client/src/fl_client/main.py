@@ -4,6 +4,10 @@ import structlog
 from fl_client.config import FL_USE_CASE, MLFLOW_URL, NODE_NAME, DATA_PATH
 from fl_client.interface import (
     clean_config_if,
+    custom_metadata_if,
+    step_zero_if,
+    privacy_budget_if,
+    evaluate_model_if,
     filter_clients_if,
     get_parameters_if,
     load_data_if,
@@ -57,6 +61,12 @@ def query(msg: Message, ctx: Context) -> Message:
     if not isinstance(mode, str):
         raise TypeError()
 
+    if mode == 'get_privacy_budget':
+        return privacy_budget_if(msg, global_vars)
+
+    if mode in ("compute_step_zero", "apply_step_zero"):
+        return step_zero_if(msg, global_vars)
+
     if mode == "filter_clients":
         return filter_clients_if(msg, global_vars)
 
@@ -79,6 +89,9 @@ def query(msg: Message, ctx: Context) -> Message:
         return set_smpc_enabled_if(msg, global_vars)
     elif mode == "set_dp_config":
         return set_dp_config_if(msg, global_vars)
+
+    elif mode in ("compute_custom_metadata", "set_custom_metadata"):
+        return custom_metadata_if(msg, global_vars)
 
     elif mode == "prepare_data":
         return prepare_data_if(msg, global_vars)
@@ -130,4 +143,4 @@ def train(msg: Message, ctx: Context) -> Message:
 
 @app.evaluate()
 def evaluate(msg: Message, ctx: Context) -> Message:
-    raise NotImplementedError()
+    return evaluate_model_if(msg, global_vars)

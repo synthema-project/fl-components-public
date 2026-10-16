@@ -39,15 +39,15 @@ class DataCatalogueClient:
         latest = {}
         for (node, collection), rows in groups.items():
             roles = {row.get("dataset_role"): row for row in rows}
-            if not {"train", "val", "test", "schema"}.issubset(roles):
+            if not {"train", "test", "schema"}.issubset(roles):
                 continue  # Incomplete uploads are not selectable.
-            stamp = max(str(row.get("timestamp", "")) for row in rows)
+            stamp = max(str(roles[role].get("timestamp", "")) for role in ("train", "test", "schema"))
             if node not in latest or stamp > latest[node][0]:
                 latest[node] = (stamp, roles)
         if groups:
             for node, (_, roles) in latest.items():
-                typed[node] = {role: roles[role]["path"] for role in ("train", "val", "test", "schema")}
-                versions = {row.get("configuration_version") for row in roles.values()}
+                typed[node] = {role: roles[role]["path"] for role in ("train", "test", "schema")}
+                versions = {roles[role].get("configuration_version") for role in ("train", "test", "schema")}
                 if len(versions) != 1 or None in versions:
                     raise ValueError("Dataset partitions do not share a configuration version")
                 row = roles["train"]
@@ -56,7 +56,7 @@ class DataCatalogueClient:
             return typed
         for record in records:
             role = record.get("dataset_role")
-            if role in {"train", "val", "test", "schema"}:
+            if role in {"train", "test", "schema"}:
                 typed.setdefault(record["node"], {})[role] = record["path"]
         if typed:
             return typed

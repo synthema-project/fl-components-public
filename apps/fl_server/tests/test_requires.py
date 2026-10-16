@@ -252,7 +252,7 @@ def test_train_model(driver, node_ids):
             )
             for _ in range(3)
         ]
-        all_replies = requires.train_model(driver, node_ids, pr, current_global_iter)
+        all_replies = requires.train_model(driver, node_ids, pr, current_global_iter, 5)
 
     mock_flow.assert_called_once_with(
         driver=driver,
@@ -260,7 +260,7 @@ def test_train_model(driver, node_ids):
         recordset_factory=interfaces.recordset.create_train_model_recordset,
         msg_type=MessageType.TRAIN,
         msg_group="train_model",
-        recordset_factory_args=(pr, current_global_iter),
+        recordset_factory_args=(pr, current_global_iter, 5),
         check_success=True,
     )
 
@@ -287,3 +287,91 @@ def test_clean_config(driver, node_ids):
         recordset_factory_args=("FINISHED",),
         timeout=15,
     )
+
+
+def test_round_evaluation_protocol_filters_skips_and_preserves_context(driver, node_ids):
+    parameters = ParametersRecord()
+    def flow(**kwargs):
+        assert kwargs['msg_type'] == MessageType.EVALUATE
+        assert kwargs['check_success'] is True
+        content = kwargs['recordset_factory'](*kwargs['recordset_factory_args'])
+        received, iteration, max_round = interfaces.recordset.read_evaluate_model_recordset(content)
+        assert received is parameters
+        assert (iteration, max_round) == (1, 5)
+        return [MagicMock(content=RecordSet(metrics_records={'metrics': metrics}))
+                for metrics in [MetricsRecord({'loss': 0.25}), MetricsRecord(), MetricsRecord()]]
+
+    with patch.object(requires, 'execution_flow', side_effect=flow):
+        records = requires.evaluate_model(driver, node_ids, parameters, 1, 5)
+    assert len(records) == 1
+    assert records[0]['loss'] == 0.25
+
+
+def test_round_evaluation_rejects_missing_client_reply(driver, node_ids):
+    with patch.object(requires, 'execution_flow', return_value=[]):
+        with pytest.raises(RuntimeError, match='every client reply'):
+            requires.evaluate_model(driver, node_ids, ParametersRecord(), 0, 5)
+
+
+def test_step_zero_collects_then_broadcasts_and_waits_for_every_client(driver, node_ids):
+    import json
+    from types import SimpleNamespace
+    from testing import dataset_model
+    from flwr.common import ConfigsRecord
+    schema = dataset_model().model_dump(mode='json')
+    events = []
+    def flow(**kwargs):
+        content = kwargs['recordset_factory'](*kwargs['recordset_factory_args'])
+        config = content.configs_records['config']
+        events.append(config['mode'])
+        if config['mode'] == 'compute_step_zero':
+            return [SimpleNamespace(content=RecordSet(configs_records={
+                'step_zero': ConfigsRecord({'payload_json': json.dumps({
+                    'metadata': schema, 'metrics': [{'feature_name': 'Age', 'count': 1.,
+                    'sum_val': float(age), 'sum_sq_val': float(age * age)}]})})}))
+                    for age in [10, 20, 30]]
+        metadata = json.loads(config['metadata_json'])
+        assert metadata['metadata']['variables'][0]['mean'] == 20.
+        return [object() for _ in node_ids]
+    state = {}
+    with patch.object(requires, 'execution_flow', side_effect=flow):
+        requires.execute_step_zero(driver, node_ids, state)
+    assert events == ['compute_step_zero', 'apply_step_zero']
+    assert state['step_zero_metadata']['metadata']['variables'][0]['mean'] == 20.
+
+
+def test_step_zero_missing_reply_stops_before_broadcast(driver, node_ids):
+    with patch.object(requires, 'execution_flow', return_value=[]) as flow:
+        with pytest.raises(RuntimeError, match='every client reply'):
+            requires.execute_step_zero(driver, node_ids, {})
+    assert flow.call_count == 1
+
+
+def test_step_zero_missing_apply_acknowledgement_fails(driver, node_ids):
+    import json
+    from types import SimpleNamespace
+    from flwr.common import ConfigsRecord
+    replies = [SimpleNamespace(content=RecordSet(configs_records={
+        'step_zero': ConfigsRecord({'payload_json': json.dumps({'metadata': None, 'metrics': []})})}))
+        for _ in node_ids]
+    with patch.object(requires, 'execution_flow', side_effect=[replies, []]):
+        with pytest.raises(RuntimeError, match='every client acknowledgement'):
+            requires.execute_step_zero(driver, node_ids, {})
+
+
+@pytest.mark.parametrize('missing', [False, True])
+def test_model_budget_collection_matches_msi_accountant_and_marks_partial(driver, node_ids, missing):
+    import json
+    from types import SimpleNamespace
+    values = [{'epsilon': 1., 'delta': 1e-5}, {'epsilon': 3., 'delta': 1e-6},
+              None if missing else {'epsilon': 2., 'delta': 1e-7}]
+    replies = [SimpleNamespace(content=RecordSet(configs_records={
+        'privacy': ConfigsRecord({'budget_json': json.dumps(value)})})) for value in values]
+    with patch.object(requires, 'execution_flow', return_value=replies):
+        result = requires.collect_privacy_budgets(driver, node_ids)
+    assert result['complete'] is (not missing)
+    if missing:
+        assert 'model_reported_budget' not in result
+        assert result['reported_nodes'] == 2
+    else:
+        assert result['model_reported_budget'] == {'epsilon': 3., 'delta': 1e-5}

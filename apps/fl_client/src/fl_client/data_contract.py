@@ -11,8 +11,8 @@ def partition_paths(paths):
     if isinstance(paths, dict):
         unknown = set(paths) - {'train', 'val', 'test', 'schema'}
         if unknown or 'train' not in paths:
-            raise ValueError('Dataset role mapping must contain train and only train/val/test/schema roles')
-        return paths
+            raise ValueError('Dataset role mapping must contain train and train/test/schema roles (legacy val is ignored)')
+        return {role: path for role, path in paths.items() if role != 'val'}
     roles = {}
     plain = []
     for path in paths:
@@ -31,7 +31,7 @@ def partition_paths(paths):
     if roles:
         if plain or 'train' not in roles:
             raise ValueError('Mixed full datasets and partitions, or missing train partition; select one dataset collection')
-        return roles
+        return {role: path for role, path in roles.items() if role != 'val'}
     if not plain:
         raise ValueError('No training CSV objects supplied')
     return {'train': plain}
@@ -52,7 +52,7 @@ def load_partitions(paths, download, evaluation=None):
     def local(path):
         return path if str(path).startswith(('/', '.')) else download(path)
     partitions = {}
-    for role in ('train', 'val', 'test'):
+    for role in ('train', 'test'):
         if role in roles:
             files = roles[role] if isinstance(roles[role], list) else [roles[role]]
             frames = [read_frame(local(p)) for p in files]
@@ -68,7 +68,7 @@ def prepare_partitions(learner, partitions, metadata):
         raise ValueError('MSI learner requires a validated DatasetMeta feature schema from the dataset or registered model artifact')
     required = [variable.name for variable in variables(metadata)]
     prepared = {}
-    for role in ('train', 'val', 'test'):
+    for role in ('train', 'test'):
         if role not in partitions:
             continue
         data = partitions[role]

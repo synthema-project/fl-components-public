@@ -71,17 +71,24 @@ def set_smpc_enabled_if(msg: Message, global_vars: dict) -> Message:
     stages.set_SMPC_enabled(smpc_enabled, global_vars)
     return responses_utils.create_success_response(msg, "set smpc enabled successfully")
 
+def evaluate_model_if(msg: Message, global_vars: dict) -> Message:
+    parameters, iteration, max_round = recordset.read_evaluate_model_recordset(msg.content)
+    stages.set_model_parameters(parameters, global_vars)
+    metrics = stages.evaluate_model(global_vars, iteration, max_round)
+    return responses_utils.create_evaluate_response(msg, metrics)
+
+
 def train_model_if(msg: Message, global_vars: dict) -> Message:
-    latest_parameters, current_global_iter = recordset.read_train_model_recordset(
+    latest_parameters, current_global_iter, max_round = recordset.read_train_model_recordset(
         msg.content
     )
     stages.set_model_parameters(latest_parameters, global_vars)
-    metrics = stages.train_model(global_vars, current_global_iter)
+    metrics = stages.train_model(global_vars, current_global_iter, max_round)
     latest_parameters = stages.get_model_parameters(global_vars)
     return responses_utils.create_train_response(msg, latest_parameters, metrics)
 
 def train_model_fixed_clipping_if(msg: Message, global_vars: dict) -> Message:
-    latest_parameters, current_global_iter = recordset.read_train_model_recordset(
+    latest_parameters, current_global_iter, max_round = recordset.read_train_model_recordset(
         msg.content
     )
     # Convert parameters from server to client in ndarrays
@@ -89,7 +96,7 @@ def train_model_fixed_clipping_if(msg: Message, global_vars: dict) -> Message:
     server_to_client_params = list(server_to_client_params_dict.values())
 
     stages.set_model_parameters(latest_parameters, global_vars)
-    metrics = stages.train_model(global_vars, current_global_iter)
+    metrics = stages.train_model(global_vars, current_global_iter, max_round)
     latest_parameters = stages.get_model_parameters(global_vars)
 
     # Convert parameters from client to server in ndarrays
@@ -113,11 +120,11 @@ def train_model_fixed_clipping_if(msg: Message, global_vars: dict) -> Message:
     return responses_utils.create_train_response(msg, clipped_parameters, metrics)
 
 def train_model_SMPC_if(msg: Message, global_vars: dict) -> Message:
-    latest_parameters, current_global_iter = recordset.read_train_model_recordset(
+    latest_parameters, current_global_iter, max_round = recordset.read_train_model_recordset(
         msg.content
     )
     stages.set_model_parameters(latest_parameters, global_vars)
-    metrics = stages.train_model(global_vars, current_global_iter)
+    metrics = stages.train_model(global_vars, current_global_iter, max_round)
     latest_parameters = stages.get_model_parameters(global_vars)
 
     serialized_params = serialize_parameters(latest_parameters)
@@ -234,3 +241,39 @@ def generate_synthetic_if(msg: Message, global_vars: dict) -> Message:
         return create_generate_synthetic_response(msg, result)
     except Exception as e:
         return create_error_response(msg, f"Synthetic generation failed: {e}")
+
+
+def custom_metadata_if(msg: Message, global_vars: dict) -> Message:
+    from fl_client import custom_metadata
+    from flwr.common import ConfigsRecord, RecordSet
+    records = {"config": ConfigsRecord({"success": True})}
+    if msg.content.configs_records["config"]["mode"] == "compute_custom_metadata":
+        metadata = custom_metadata.compute(global_vars)
+        if metadata is not None:
+            records["custom_metadata"] = metadata
+    else:
+        custom_metadata.apply(msg.content.configs_records["custom_metadata"], global_vars)
+    return msg.create_reply(content=RecordSet(configs_records=records))
+
+
+def step_zero_if(msg: Message, global_vars: dict) -> Message:
+    import json
+    from flwr.common import ConfigsRecord, RecordSet
+    config = msg.content.configs_records['config']
+    if config['mode'] == 'compute_step_zero':
+        payload = stages.compute_step_zero(global_vars)
+        return msg.create_reply(content=RecordSet(configs_records={
+            'config': ConfigsRecord({'success': True}),
+            'step_zero': ConfigsRecord({'payload_json': json.dumps(payload, allow_nan=False)}),
+        }))
+    stages.apply_step_zero(json.loads(config['metadata_json']), global_vars)
+    return responses_utils.create_success_response(msg, 'Step 0 metadata applied and learner initialized')
+
+
+def privacy_budget_if(msg: Message, global_vars: dict) -> Message:
+    import json
+    from flwr.common import ConfigsRecord, RecordSet
+    return msg.create_reply(content=RecordSet(configs_records={
+        'config': ConfigsRecord({'success': True}),
+        'privacy': ConfigsRecord({'budget_json': json.dumps(stages.get_privacy_budget(global_vars))}),
+    }))

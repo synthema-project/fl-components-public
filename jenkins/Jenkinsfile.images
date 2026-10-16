@@ -3,18 +3,13 @@ pipeline {
     options { disableConcurrentBuilds() }
     parameters {
         choice(name: 'NETWORK_PROFILE', choices: ['AML', 'SCD'], description: 'Disease network; builds the matching full validation image profile')
-        string(name: 'VALIDATION_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'PyPI simple index URL providing safe-validation/sd-metrics; omit credentials from the URL')
-        string(name: 'PRIVACY_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'PyPI simple index URL providing synth-privacy; omit credentials from the URL')
-        string(name: 'SYNTHEMA_PYPI_USERNAME', defaultValue: '', description: 'Shared PyPI username for validation, privacy and fidelity; empty for anonymous access')
+        string(name: 'SYNTHEMA_PYPI_URL', defaultValue: 'https://pypi.synthema.rid-intrasoft.eu/simple/', description: 'Shared PyPI simple index for MSI and all validation packages; omit credentials from the URL')
+        string(name: 'SYNTHEMA_PYPI_USERNAME', defaultValue: '', description: 'Shared PyPI username for MSI, validation, privacy and fidelity; empty for anonymous access')
         password(name: 'SYNTHEMA_PYPI_PASSWORD', defaultValue: '', description: 'Shared PyPI password; leave both PyPI inputs empty for anonymous access')
-        string(name: 'MSI_REPOSITORY', defaultValue: 'https://github.com/synthema-project/app-model_store-interface.git', description: 'MSI source repository')
-        string(name: 'MSI_BRANCH', defaultValue: '', description: 'Branch to build, e.g. fl-validation-frozen; build its latest pushed version')
-        password(name: 'MSI_GITHUB_TOKEN', defaultValue: '', description: 'GitHub token with read access to the MSI repository; empty for public access')
     }
     environment {
         DOCKER_REG = 'harbor.synthema.rid-intrasoft.eu'
         DOCKER_REPO = '/fl/'
-        MSI_WHEELS_PREPARED = '1'
         VALIDATION_PROFILE = "${params.NETWORK_PROFILE.toLowerCase()}-full"
     }
     stages {
@@ -32,14 +27,6 @@ if bool(os.environ.get('SYNTHEMA_PYPI_USERNAME', '').strip()) != bool(os.environ
 PYINPUT
                     '''
                     env.FL_SOURCE_BRANCH = env.GIT_BRANCH ?: ''
-                    def branches = [params.MSI_BRANCH]
-                    for (value in branches) {
-                        def branch = value.trim()
-                        if (!branch) { error('Supply a branch for each selected package') }
-                        withEnv(["PACKAGE_BRANCH=${branch}"]) {
-                            sh 'git check-ref-format "refs/heads/$PACKAGE_BRANCH"'
-                        }
-                    }
                     def version = readFile('version').trim()
                     if (!(version ==~ /[A-Za-z0-9_][A-Za-z0-9_.-]*/)) { error('Invalid image version') }
                     env.RELEASE_IMAGE_TAG = "${version}-${env.VALIDATION_PROFILE}"
@@ -47,31 +34,18 @@ PYINPUT
                 }
             }
         }
-        stage('Check out package sources') {
-            steps {
-                script {
-                    dir('.ci-sources/msi') {
-                        deleteDir()
-                        env.MSI_RESOLVED_COMMIT = sh(
-                            script: 'python3 "$WORKSPACE/scripts/checkout_msi.py"',
-                            returnStdout: true
-                        ).trim()
-                    }
-
-                }
-            }
-        }
-        stage('Build MSI wheel') {
+        stage('Prepare uv lock') {
             steps {
                 sh '''
+                    set +x
                     set -eu
-                    rm -rf .ci-package-build
-                    python3 -m venv .ci-package-build
-                    .ci-package-build/bin/python -m pip install 'build==1.2.2.post1'
-                    .ci-package-build/bin/python scripts/build_validation_sources.py
-                    python3 scripts/prepare_validation.py --wheels .ci-wheels --profile "$VALIDATION_PROFILE"
+                    python3 -m venv .ci-uv
+                    .ci-uv/bin/python -m pip install 'uv==0.11.19'
+                    export UV_EXECUTABLE="$WORKSPACE/.ci-uv/bin/uv"
+                    python3 scripts/lock_dependencies.py
                 '''
-                archiveArtifacts artifacts: '.ci-wheels/*.whl,.ci-wheels/provenance.json', fingerprint: true
+                // Bootstrap artifact: commit it to make subsequent builds check-only.
+                archiveArtifacts artifacts: 'uv.lock', fingerprint: true
             }
         }
         stage('Build images') {

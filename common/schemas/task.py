@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Self
 from sqlmodel import SQLModel, Field, Column, Enum
 from pydantic import BaseModel, model_validator
@@ -30,7 +30,7 @@ class TaskBase(SQLModel):
     num_global_iterations: int = Field(nullable=False)
     run_name: str = Field(nullable=False)
     experiment_name: str = Field(nullable=False)
-    SMPC_enabled: bool = Field(default=False)
+    SMPC_enabled: bool = Field(default=True)
     dp_mode: Optional[str] = Field(default=None)
     noise_multiplier: Optional[int] = Field(default=None)
     clipping_norm: Optional[int] = Field(default=None)
@@ -50,16 +50,22 @@ class TaskBase(SQLModel):
 class TaskRead(TaskBase, table=True):
     id: int = Field(default=None, primary_key=True, nullable=False)
     status: Status = Field(default=Status.PENDING, sa_column=Column(Enum(Status)))
-    created_at: datetime = Field(default_factory=datetime.now, nullable=False)
+    # Existing databases store UTC in TIMESTAMP WITHOUT TIME ZONE. asyncpg
+    # requires a naive datetime for that column, even when the clock uses UTC.
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+        nullable=False,
+    )
 
     @model_validator(mode='after')
     def validate_security_protocol(self) -> Self:
         if self.dp_mode == "None":
-            self.dp_mode = None
+            # SQLModel validates before SQLAlchemy instance state is attached.
+            self.__dict__["dp_mode"] = None
         if self.dp_mode not in (None, "central_dp", "local_dp"):
             raise ValueError("Invalid dp_mode. Must be 'central_dp', 'local_dp', or None.")
-        if self.dp_mode in ("central_dp", "local_dp") and self.SMPC_enabled is True:
-            raise ValueError("SMPC cannot be enabled when dp_mode is set.")
+        if self.dp_mode == "central_dp" and self.SMPC_enabled is True:
+            raise ValueError("SMPC cannot be enabled with central_dp; model-local DP remains supported.")
         return self
 
     def change_status(self, new_status: str) -> None:

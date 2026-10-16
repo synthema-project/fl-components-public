@@ -1,4 +1,5 @@
 """Validate and register existing MLflow pyfunc artifacts without loading their pickle."""
+from contextlib import contextmanager
 import json
 import logging
 import os
@@ -132,6 +133,18 @@ def validate_bundle(folder, use_case):
         raise HTTPException(400, f'Invalid MLflow model artifact: {error}') from error
 
 
+@contextmanager
+def _artifact_tracking_uri(uri):
+    """MLflow's proxied artifact repository also reads the global tracking URI."""
+    import mlflow
+    previous = mlflow.get_tracking_uri()
+    try:
+        mlflow.set_tracking_uri(uri)
+        yield
+    finally:
+        mlflow.set_tracking_uri(previous)
+
+
 def register_bundle(folder, experiment_name, use_case, trained, model_name,
                     aggregator_name, user_id, descriptor):
     from mlflow.exceptions import MlflowException
@@ -139,7 +152,7 @@ def register_bundle(folder, experiment_name, use_case, trained, model_name,
 
     # SDK artifact upload does not import the model or install its requirements.
     # Retain existing service credentials, never a user's Keycloak token.
-    with _LOCK:
+    with _LOCK, _artifact_tracking_uri(config.MLFLOW_BASE_URL):
         if config.MLFLOW_TRACKING_USERNAME:
             os.environ['MLFLOW_TRACKING_USERNAME'] = config.MLFLOW_TRACKING_USERNAME
             os.environ['MLFLOW_TRACKING_PASSWORD'] = config.MLFLOW_TRACKING_PASSWORD

@@ -57,16 +57,24 @@ def test_server_preserves_training_error_and_allows_next_task():
     import asyncio
     from unittest.mock import patch, AsyncMock
     from fl_server import app
-    task = SimpleNamespace(id=1, use_case="AML", selected_nodes=["ICH"],
-                           SMPC_enabled=False, dp_mode=None, num_global_iterations=1,
+    task = SimpleNamespace(id=1, use_case="AML", selected_nodes=["ICH", "VHIR"],
+                           SMPC_enabled=False, dp_mode="central_dp", noise_multiplier=1, clipping_norm=1, num_global_iterations=1,
                            num_synthetic_samples=0)
     driver = Mock()
-    with patch.object(app.requires, "filter_clients", return_value=[1]), \
+    with patch.object(app.requires, "filter_clients", return_value=[1, 2]), \
          patch.object(app, "configure_mlflow", new_callable=AsyncMock), \
          patch.object(app, "load_model_and_data", new_callable=AsyncMock), \
+         patch.object(app, "set_SMPC_enabled", new_callable=AsyncMock), \
+         patch.object(app, "set_dp_config", new_callable=AsyncMock), \
+         patch.object(app.requires, "start_P2P_server"), \
+         patch.object(app.requires, "discover_peers", return_value=[["peer2"], ["peer1"]]), \
+         patch.object(app.requires, "connect_peers"), \
          patch.object(app, "execute_training_loop", new_callable=AsyncMock) as train, \
          patch.object(app.requires, "get_parameters_from_one_node"), \
          patch.object(app.requires, "set_parameters"), \
+         patch.object(app.requires, "collect_privacy_budgets", return_value={
+             'complete': False, 'reported_nodes': 0, 'total_nodes': 2}), \
+         patch.object(app.mlflow_client, "log_metrics"), \
          patch.object(app.requires, "upload_model") as upload, \
          patch.object(app.requires, "clean_config") as clean_clients, \
          patch.object(app.mlflow_client, "clean_current_config") as clean_server:

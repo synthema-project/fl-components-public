@@ -85,7 +85,7 @@ async def create_task(
                 if published.json().get('documents') != entry['documents']:
                     raise ValueError('Dataset configuration does not match the published central version')
                 privacy = entry['documents']['evaluation']['privacy_evaluation']
-                if privacy['differential_privacy'] != (task.dp_mode not in (None, 'None')):
+                if task.dp_mode == 'central_dp' and not privacy['differential_privacy']:
                     raise ValueError('Task DP mode does not match the frozen privacy configuration')
                 return snapshot
             try:

@@ -32,7 +32,7 @@ class TaskBase(SQLModel):
     num_global_iterations: int = Field(nullable=False)
     run_name: str = Field(nullable=False)
     experiment_name: str = Field(nullable=False)
-    SMPC_enabled: bool = Field(default=False)
+    SMPC_enabled: bool = Field(default=True)
     dp_mode: Optional[str] = Field(default=None)
     noise_multiplier: Optional[int] = Field(default=None)
     clipping_norm: Optional[int] = Field(default=None)
@@ -68,8 +68,8 @@ class TaskRead(TaskBase):
             self.dp_mode = None
         if self.dp_mode not in (None, "central_dp", "local_dp"):
             raise ValueError("Invalid dp_mode. Must be 'central_dp', 'local_dp', or None.")
-        if self.dp_mode in ("central_dp", "local_dp") and self.SMPC_enabled:
-            raise ValueError("SMPC cannot be enabled when dp_mode is set.")
+        if self.dp_mode == "central_dp" and self.SMPC_enabled:
+            raise ValueError("SMPC cannot be enabled with central_dp; model-local DP remains supported.")
         return self
 
     def change_status(self, new_status: str) -> None:

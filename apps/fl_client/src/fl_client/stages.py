@@ -103,8 +103,8 @@ def prepare_data(global_vars: dict) -> None:
     learner = global_vars["local_learner"]
     metadata = global_vars.get("model_meta")
     cfg = evaluation_settings(metadata).get("aml_utility")
-    if full_reporting_enabled() and not {"train", "val", "test"}.issubset(global_vars["data_partitions"]):
-        raise ValueError("Full reporting requires independent train, val and test partitions from ingestion")
+    if full_reporting_enabled() and not {"train", "test"}.issubset(global_vars["data_partitions"]):
+        raise ValueError("Full reporting requires independent train and test partitions from ingestion")
     if utility_reporting_enabled(metadata):
         from fl_client.data_contract import ensure_utility_holdout
         global_vars["data_partitions"] = ensure_utility_holdout(global_vars["data_partitions"], cfg)
@@ -122,10 +122,9 @@ def prepare_data(global_vars: dict) -> None:
             global_vars["data"] = result
 
 
-def load_model(global_vars: dict) -> None:
+def load_model_metadata(global_vars: dict) -> None:
     model = mlflow_client.load_model()
     global_vars["model"] = model
-    python_model = model.unwrap_python_model()
     payload = mlflow_client.load_dataset_meta(model)
     if payload is not None:
         registered_meta = parse_metadata(payload) if global_vars.get("model_meta") is None else global_vars["model_meta"]
@@ -133,6 +132,10 @@ def load_model(global_vars: dict) -> None:
         # holdout policy. Older catalogue metadata must not disable evaluation.
         if global_vars.get("model_meta") is None or evaluation_settings(registered_meta).get("aml_utility"):
             global_vars["model_meta"] = registered_meta
+
+
+def initialize_learner(global_vars: dict) -> None:
+    python_model = global_vars['model'].unwrap_python_model()
     factory = python_model.create_local_learner
     metadata = global_vars.get("model_meta")
     learner = factory(dataset_meta=metadata) if metadata is not None and _accepts_parameter(factory, "dataset_meta") else factory()
@@ -141,37 +144,76 @@ def load_model(global_vars: dict) -> None:
     global_vars["local_learner"] = learner
 
 
+def load_model(global_vars: dict) -> None:
+    load_model_metadata(global_vars)
+    initialize_learner(global_vars)
+
+
+def compute_step_zero(global_vars: dict) -> dict:
+    from interfaces.step_zero import compute
+    # Discard any learner left over from a preceding task before loading metadata.
+    global_vars['local_learner'] = None
+    global_vars['reported_privacy_budget'] = None
+    load_model_metadata(global_vars)
+    metadata = global_vars.get('model_meta')
+    payload = metadata.model_dump(mode='json') if metadata is not None else None
+    metrics = compute(global_vars['data_partitions']['train'], payload) if payload is not None else []
+    return {'metadata': payload, 'metrics': metrics}
+
+
+def apply_step_zero(metadata: dict | None, global_vars: dict) -> None:
+    if metadata is not None:
+        # Preserve each node's evaluation settings; only feature statistics change.
+        local = global_vars['model_meta'].model_dump(mode='json')
+        from interfaces.step_zero import numeric_variables
+        stats = {v['name']: v for v in numeric_variables(metadata)}
+        for variable in numeric_variables(local):
+            source = stats[variable['name']]
+            for key in ('mean', 'std'):
+                if key in source:
+                    variable[key] = source[key]
+        global_vars['model_meta'] = parse_metadata(local)
+    initialize_learner(global_vars)
+
+
 def train_model(
     global_vars: dict,
     current_global_iter: int,
+    max_round: int,
 ) -> MetricsRecord:
+    if (type(current_global_iter) is not int or type(max_round) is not int
+            or not 0 <= current_global_iter < max_round):
+        raise ValueError("Invalid federated round context")
+    current_round = current_global_iter + 1
     local_learner = global_vars["local_learner"]
     dataset_meta = global_vars.get("model_meta")
     train_round = getattr(local_learner, "train_round", None)
     if dataset_meta is not None and train_round is not None and _accepts_parameter(train_round, "dataset_meta"):
-        metrics = train_round(global_vars["data"], dataset_meta)
+        round_context = {"current_round": current_round, "max_round": max_round}
+        kwargs = {key: value for key, value in round_context.items()
+                  if _accepts_parameter(train_round, key)}
+        metrics = train_round(global_vars["data"], dataset_meta, **kwargs)
     else:
         metrics = local_learner.train()
     if not isinstance(metrics, MetricsRecord):
         raise TypeError(f"Unexpected metrics type: {type(metrics)}")
-    mlflow_client.log_metrics(metrics, current_global_iter)
+    from interfaces.privacy import budget, scalar_metrics
+    # Do not average, rewrite, or remove the model's metrics before aggregation.
+    global_vars['reported_privacy_budget'] = budget(metrics.get('privacy_budget', None))
+    mlflow_client.log_metrics({**scalar_metrics(metrics), "fl/current_round": current_round,
+                               "fl/max_round": max_round}, current_global_iter)
     return metrics
 
 
-def evaluate_model(global_vars: dict) -> MetricsRecord:
-    local_learner = global_vars["local_learner"]
-    dataset_meta = global_vars.get("model_meta")
-    evaluate = getattr(local_learner, "evaluate")
-    if dataset_meta is not None and _accepts_parameter(evaluate, "dataset_meta"):
-        validation = global_vars.get("prepared_partitions", {}).get("val")
-        if validation is None:
-            raise ValueError("Model evaluation requires the validation partition")
-        metrics = evaluate(validation, dataset_meta)
-    else:
-        metrics = evaluate()
-    if not isinstance(metrics, MetricsRecord):
-        raise TypeError(f"Expected MetricsRecord, got {type(metrics)}")
-    return metrics
+def evaluate_model(
+    global_vars: dict, current_global_iter: int = 0, max_round: int = 1,
+) -> MetricsRecord:
+    if (type(current_global_iter) is not int or type(max_round) is not int
+            or not 0 <= current_global_iter < max_round):
+        raise ValueError("Invalid federated round context")
+    # The independent test set is reserved for final synthetic-data reports.
+    # No separate validation partition is used during federated rounds.
+    return MetricsRecord({})
 
 
 def get_model_parameters(
@@ -189,7 +231,7 @@ def set_model_parameters(parameters: ParametersRecord, global_vars: dict) -> Non
     local_learner.set_parameters(parameters)
 
 def set_dp_config(dp_params:dict, global_vars:dict):
-    global_vars["dp_config"] = dp_params
+    global_vars["dp_config"] = None if dp_params["dp_mode"] in (None, "None") else dp_params
 
 
 
@@ -378,6 +420,7 @@ def send_shares_to_peers(secret_shares: Dict[str, List[np.ndarray]],
         except grpc.RpcError as e:
             logger.error(f"Failed to send shares to peer {node_names[peer_node_name]}: {e}")
 
+
 def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     try:
         # Wait for all shares from other clients
@@ -405,3 +448,10 @@ def reconstruct_shares(local_shares: Dict, smpc_client: SMPCClient):
     except TimeoutError as e:
         logger.error(f"Client {smpc_client.client_id} failed to receive all shares: {e}")
         return None
+
+
+def get_privacy_budget(global_vars: dict) -> dict | None:
+    from interfaces.privacy import budget
+    hook = getattr(global_vars['local_learner'], 'get_privacy_spent', None)
+    reported = budget(hook()) if callable(hook) else None
+    return reported if reported is not None else global_vars.get('reported_privacy_budget')

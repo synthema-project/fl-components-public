@@ -23,6 +23,10 @@ def run_command(command: str, description: str, project: Optional[str] = None):
     print(f"Running {description}{context}...")
 
     env = os.environ.copy()
+    root = Path(__file__).resolve().parents[1]
+    paths = [root / 'common', root] + [root / 'apps' / name / 'src'
+            for name in ('fl_client', 'fl_server', 'restapi', 'status_listener')]
+    env['PYTHONPATH'] = os.pathsep.join(map(str, paths)) + os.pathsep + env.get('PYTHONPATH', '')
     for var in ENV_VARS_TO_REMOVE:
         env.pop(var, None)  # Ensure a clean environment
 
@@ -59,9 +63,10 @@ def run_tests():
     docker_config = load_docker_config()
     script_dir = Path(__file__).resolve().parent.parent
 
+    os.chdir(script_dir)
     # Global checks
-    for tool in ["ruff check --fix", "ruff format"]:
-        run_command(f"uv run {tool}", tool)
+    for tool in ["ruff check", "ruff format --check"]:
+        run_command(f"uv run --locked {tool}", tool)
 
     print("=" * 67)
 
@@ -76,7 +81,7 @@ def run_tests():
         if image.get("test"):
             for test_cmd in ["pytest", "python -m mypy . --explicit-package-bases"]:
                 run_command(
-                    f"uv run {test_cmd}", test_cmd, project=str(project_path)
+                    f"uv run --locked {test_cmd}", test_cmd, project=str(project_path)
                 )
 
         os.chdir(script_dir)  # Restore working directory

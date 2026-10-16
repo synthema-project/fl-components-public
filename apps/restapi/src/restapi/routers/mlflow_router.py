@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, File, Form, UploadFile
 from restapi.helpers.mlflow_helper import MLFlowUserCreateRequest, UpdatePasswordRequest, UpdateAdminRequest, PermissionRequest
 from restapi.helpers.mlflow_helper import create_user, get_user, update_password, update_admin, delete_user, create_experiment_permission, get_experiment_permission, update_experiment_permission, delete_experiment_permission, create_model_permission, get_model_permission, update_model_permission, delete_model_permission
 from restapi.helpers.mlflow_helper import search_experiments, get_experiment, create_experiment, delete_experiment, restore_experiment, search_runs, get_run, delete_run, restore_run, list_registered_models, get_registered_model, create_registered_model, delete_registered_model, get_model_version, get_model_versions, get_model_download_uri, get_all_run_metrics, get_run_metrics, search_model_versions_by_run, log_batch_metrics, LogMetricsRequest
 from restapi.auth import UserClaims, require_authentication
+from restapi.routers.models import upload_model as register_uploaded_model
 
 router_admin = APIRouter(prefix="/mlflow-admin", tags=["mlflow-admin"])
 
@@ -96,6 +97,25 @@ def delete_model_permission_(payload: PermissionRequest, current_user: UserClaim
 
 ###### END OF ADMIN ENDPOINTS   ######
 router = APIRouter(prefix="/mlflow", tags=["mlflow"])
+
+# --- Model upload ---
+@router.post("/models/upload", status_code=201,
+             summary="Upload and register an MSI MLflow model")
+def upload_model(
+    bundle: UploadFile = File(...),
+    experiment_name: str = Form(..., min_length=1, max_length=255),
+    use_case: str = Form(...),
+    trained: bool = Form(False),
+    model_name: str = Form(..., min_length=1, max_length=255),
+    aggregator_name: str = Form(..., min_length=1, max_length=255),
+    user: UserClaims = Depends(require_authentication),
+):
+    return register_uploaded_model(
+        bundle=bundle, experiment_name=experiment_name, use_case=use_case,
+        trained=trained, model_name=model_name, aggregator_name=aggregator_name,
+        user=user,
+    )
+
 
 # --- Experiments ---
 @router.post("/experiments/search")

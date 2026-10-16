@@ -22,7 +22,7 @@ run_uv_command() {
     local project=$3
 
     echo "Running ${message} for ${project:-"root project"}..."
-    uv run $command > /dev/null
+    uv run --locked $command > /dev/null
     if [ $? -ne 0 ]; then
         echo "Error: ${message} failed ${project:+for $project}."
         exit 1
@@ -33,8 +33,8 @@ run_uv_command() {
 # Function to run tests and quality tools
 run_tests() {
     # Run global checks
-    run_uv_command "ruff check --fix" "ruff check"
-    run_uv_command "ruff format" "ruff format"
+    run_uv_command "ruff check" "ruff check"
+    run_uv_command "ruff format --check" "ruff format"
     echo "==================================================================="
 
     # Run tests and checks for each project
@@ -53,6 +53,8 @@ script_dir="$(dirname "$(realpath "$0")")"
 
 # Change to the parent directory
 cd "$(dirname "$script_dir")" || exit
+
+export PYTHONPATH="$PWD/common:$PWD/apps/fl_client/src:$PWD/apps/fl_server/src:$PWD/apps/restapi/src:$PWD/apps/status_listener/src:$PWD${PYTHONPATH:+:$PYTHONPATH}"
 
 # Check if .env file exists
 if [ -f .env ]; then

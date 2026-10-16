@@ -76,7 +76,7 @@ async def test_load_model_and_data(task, driver, node_ids):
     with (
         patch("fl_server.app.stages.load_model") as mock_load_model,
         patch("fl_server.app.requires.load_data") as mock_load_data,
-        patch("fl_server.app.requires.load_model") as mock_load_model_driver,
+        patch("fl_server.app.requires.execute_step_zero") as mock_step_zero,
         patch("fl_server.app.requires.prepare_data") as mock_prepare_data,
         patch.dict(config.global_vars, {"aggregator": "agg"}),
     ):
@@ -86,9 +86,7 @@ async def test_load_model_and_data(task, driver, node_ids):
         mock_load_data.assert_called_once_with(
             driver, node_ids, task.use_case, config.global_vars.get("metadata_documents"), node_names=None
         )
-        mock_load_model_driver.assert_called_once_with(
-            driver, node_ids, task.model_name, task.model_version
-        )
+        mock_step_zero.assert_called_once_with(driver, node_ids, config.global_vars)
         mock_prepare_data.assert_called_once_with(driver, node_ids)
 
 
@@ -101,6 +99,7 @@ async def test_execute_training_loop(driver, node_ids, parameters):
         patch("fl_server.app.stages.aggregate_metrics") as mock_aggregate_metrics,
         patch("fl_server.app.mlflow_client.log_metrics") as mock_log_metrics,
         patch("fl_server.app.requires.set_parameters") as mock_set_params,
+        patch("fl_server.app.requires.evaluate_model", return_value=[]) as mock_evaluate,
     ):
         mock_train.return_value = [(parameters, {}) for _ in range(n_global_iter)]
         mock_aggregate_params.return_value = parameters
@@ -108,10 +107,16 @@ async def test_execute_training_loop(driver, node_ids, parameters):
 
         assert await execute_training_loop(driver, node_ids, parameters, n_global_iter) is parameters
 
+        assert mock_train.call_args_list[0].kwargs == {"current_global_iter": 0, "max_round": 5}
+        assert mock_train.call_args_list[-1].kwargs == {"current_global_iter": 4, "max_round": 5}
+        assert mock_log_metrics.call_args_list[-1].args[0] == {
+            "accuracy": 0.9, "fl/current_round": 5, "fl/max_round": 5}
         assert mock_train.call_count == n_global_iter
         assert mock_aggregate_params.call_count == n_global_iter
         assert mock_log_metrics.call_count == n_global_iter
         assert mock_set_params.call_count == n_global_iter
+        assert mock_evaluate.call_count == n_global_iter
+        assert mock_evaluate.call_args.kwargs == {"current_global_iter": 4, "max_round": 5}
 
 
 
@@ -141,6 +146,14 @@ def test_federated_server_app(task, driver, node_ids, parameters):
             "fl_server.app.requires.upload_model", autospec=True
         ) as mock_upload_model,
         patch("fl_server.app.requires.generate_synthetic_data", autospec=True) as mock_generate,
+        patch("fl_server.app.requires.collect_privacy_budgets", return_value={
+            'complete': False, 'reported_nodes': 0, 'total_nodes': 2}),
+        patch("fl_server.app.mlflow_client.log_metrics"),
+        patch("fl_server.app.set_SMPC_enabled", new_callable=AsyncMock),
+        patch("fl_server.app.set_dp_config", new_callable=AsyncMock),
+        patch("fl_server.app.requires.start_P2P_server"),
+        patch("fl_server.app.requires.discover_peers", return_value=[["peer3"], ["peer2"]]),
+        patch("fl_server.app.requires.connect_peers"),
         patch(
             "fl_server.app.mlflow_client.clean_current_config", autospec=True
         ) as mock_clean_mlflow,
@@ -180,3 +193,36 @@ def test_federated_server_app(task, driver, node_ids, parameters):
             driver, filtered_node_ids, task.num_synthetic_samples, task.use_case, task.model_name,
             node_names={}
         )
+
+
+@pytest.mark.asyncio
+async def test_custom_metadata_is_automatic_and_precedes_preparation(task, driver, node_ids):
+    events = []
+    with (
+        patch('fl_server.app.stages.load_model'),
+        patch('fl_server.app.requires.load_data'),
+        patch('fl_server.app.requires.execute_step_zero', side_effect=lambda *a: events.append('step_zero')),
+        patch('fl_server.app.requires.exchange_custom_metadata', side_effect=lambda *a: events.append('custom_metadata')),
+        patch('fl_server.app.requires.prepare_data', side_effect=lambda *a: events.append('prepare_data')),
+    ):
+        await load_model_and_data(task, driver, node_ids)
+    assert events == ['step_zero', 'custom_metadata', 'prepare_data']
+
+
+@pytest.mark.asyncio
+async def test_round_evaluation_uses_updated_parameters_and_logs_separately(driver, node_ids):
+    initial, updated = ParametersRecord(), ParametersRecord()
+    events = []
+    with (
+        patch('fl_server.app.requires.train_model', return_value=[(initial, MetricsRecord())]),
+        patch('fl_server.app.stages.aggregate_parameters', return_value=updated),
+        patch('fl_server.app.stages.aggregate_metrics', side_effect=lambda records, state: records[0]),
+        patch('fl_server.app.requires.set_parameters', side_effect=lambda *a: events.append('broadcast')),
+        patch('fl_server.app.requires.evaluate_model', side_effect=lambda *a, **kw:
+              events.append('evaluate') or [MetricsRecord({'loss': 0.25})]) as evaluate,
+        patch('fl_server.app.mlflow_client.log_metrics') as log,
+    ):
+        await execute_training_loop(driver, node_ids, initial, 1)
+    assert events == ['broadcast', 'evaluate']
+    assert evaluate.call_args.args[2] is updated
+    log.assert_any_call({'eval/loss': 0.25}, step=0)

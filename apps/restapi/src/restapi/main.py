@@ -1,7 +1,7 @@
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from restapi.routers import tasks, models, mlflow_router as mlflow
+from restapi.routers import tasks, mlflow_router as mlflow
 from restapi.services.lifespan import lifespan
 #from restapi.auth import keycloak
 
@@ -14,7 +14,6 @@ def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     # keycloak.add_swagger_config(app)
     app.include_router(tasks.router)
-    app.include_router(models.router)
     # app.include_router(dashboard.router)
     app.include_router(mlflow.router)
     app.include_router(mlflow.router_admin)

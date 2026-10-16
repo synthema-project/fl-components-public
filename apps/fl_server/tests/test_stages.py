@@ -98,3 +98,42 @@ def test_filter_clients():
     filtered_node_ids = stages.filter_clients(messages_mock)
 
     assert filtered_node_ids == [1, 3]
+
+
+def test_local_dp_preserves_custom_aggregator_and_adds_no_platform_noise():
+    from types import SimpleNamespace
+    first, second, custom_result = ParametersRecord(), ParametersRecord(), ParametersRecord()
+    aggregate = Mock(return_value=custom_result)
+    state = {'aggregator': SimpleNamespace(aggregate_parameters=aggregate),
+             'SMPC_enabled': False, 'dp_config': {'dp_mode': 'local_dp',
+             'noise_multiplier': 1, 'clipping_norm': 1, 'number_of_clients': 2}}
+    with patch.object(stages, 'add_gaussian_noise_global_parameters') as noise:
+        assert stages.aggregate_parameters([first, second], state) is custom_result
+    aggregate.assert_called_once_with([first, second])
+    noise.assert_not_called()
+
+
+def test_existing_central_dp_runs_after_custom_aggregator_and_uses_noise_result():
+    from types import SimpleNamespace
+    inputs = [ParametersRecord(), ParametersRecord()]
+    aggregate_result, noisy_result = ParametersRecord(), ParametersRecord()
+    aggregate = Mock(return_value=aggregate_result)
+    state = {'aggregator': SimpleNamespace(aggregate_parameters=aggregate),
+             'dp_config': {'dp_mode': 'central_dp', 'noise_multiplier': 2,
+                           'clipping_norm': 3, 'number_of_clients': 2}}
+    with patch.object(stages, 'add_gaussian_noise_global_parameters', return_value=noisy_result) as noise:
+        assert stages.aggregate_parameters(inputs, state) is noisy_result
+    aggregate.assert_called_once_with(inputs)
+    noise.assert_called_once_with(aggregate_result, 2, 3, 2)
+
+
+def test_partner_gaussian_noise_formula_is_preserved():
+    import numpy as np
+    from collections import OrderedDict
+    from fl_models.iris.utils import Utils
+    from fl_server.utils import dp_utils
+    parameters = Utils.dict_to_parameter_record(OrderedDict(weight=np.array([2.], dtype=np.float32)))
+    with patch.object(dp_utils.np.random, 'normal', return_value=np.array([.25])) as gaussian:
+        result = dp_utils.add_gaussian_noise_global_parameters(parameters, 2, 3, 4)
+    gaussian.assert_called_once_with(0, 1.5, (1,))
+    np.testing.assert_allclose(Utils.parameters_to_dict(result)['weight'], [2.25])

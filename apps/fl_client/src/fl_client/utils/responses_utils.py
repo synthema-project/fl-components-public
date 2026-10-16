@@ -154,3 +154,10 @@ def create_error_response(
     )
     rs = RecordSet(configs_records={"config": configsrecord})
     return msg.create_reply(content=rs, ttl=DEFAULT_TTL)
+
+
+def create_evaluate_response(msg: Message, metrics: MetricsRecord) -> Message:
+    return msg.create_reply(content=RecordSet(
+        metrics_records={"metrics": metrics},
+        configs_records={"config": ConfigsRecord({"success": True})},
+    ), ttl=DEFAULT_TTL)

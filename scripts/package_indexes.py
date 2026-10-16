@@ -1,4 +1,4 @@
-"""Validate public index locations before passing them as Docker build arguments."""
+"""Validate the shared private index location before passing them as Docker build arguments."""
 import os
 from urllib.parse import urlsplit
 
@@ -7,7 +7,7 @@ DEFAULT_INDEX = 'https://pypi.synthema.rid-intrasoft.eu/simple/'
 
 def package_indexes(env):
     result = {}
-    for name in ('VALIDATION_PYPI_URL', 'PRIVACY_PYPI_URL'):
+    for name in ('SYNTHEMA_PYPI_URL',):
         value = env.get(name, DEFAULT_INDEX).strip()
         try:
             parsed = urlsplit(value)

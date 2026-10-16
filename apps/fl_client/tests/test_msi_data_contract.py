@@ -17,10 +17,10 @@ def test_preparation_training_upload_preserves_fitted_parameters(tmp_path, monke
     with patch.object(mlflow_client, 'load_model', return_value=model()), patch.object(mlflow_client, 'load_dataset_meta', return_value=None):
         stages.load_model(state)
     stages.prepare_data(state)
-    assert len(state['data']) == 72
+    assert len(state['data']) == 96
     assert len(state['prepared_partitions']['test']) == 24
     with patch.object(mlflow_client, 'log_metrics'):
-        assert stages.train_model(state, 1)['n_samples'] == 72
+        assert stages.train_model(state, 1, 5)['n_samples'] == 96
     parameters = stages.get_model_parameters(state)
     with patch.object(mlflow_client, 'upload_final_state', return_value={'model_id': 'trained'}) as upload:
         stages.upload_model(parameters, state)
@@ -54,3 +54,9 @@ def test_full_reporting_requires_an_independent_holdout(monkeypatch):
     with pytest.raises(ValueError, match='independent'):
         stages.prepare_data({'local_learner': Learner(), 'model_meta': dataset_model(),
                              'data_partitions': {'train': pd.DataFrame({'Age': [40]})}})
+
+
+def test_legacy_val_is_ignored_in_mappings_and_paths():
+    from fl_client.data_contract import partition_paths
+    assert partition_paths({'train': 't', 'test': 'h', 'val': 'old'}) == {'train': 't', 'test': 'h'}
+    assert partition_paths(['x_train.csv', 'x_test.csv', 'x_val.csv']) == {'train': 'x_train.csv', 'test': 'x_test.csv'}
