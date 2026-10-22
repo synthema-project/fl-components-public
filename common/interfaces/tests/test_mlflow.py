@@ -1,17 +1,20 @@
 from unittest.mock import MagicMock, Mock, patch
+from types import SimpleNamespace
 
 import pytest
 
 from interfaces import mlflow_client
 
-pytest.fixture(autouse=True)
-
-
-def reset_mlflow_client():
-    mlflow_client._initialized.value = False
-    mlflow_client._configured.value = False
-    mlflow_client._current_config.clean()
-    mlflow_client._mlflow_client = None
+@pytest.fixture(autouse=True)
+def reset_mlflow_client(monkeypatch):
+    monkeypatch.setattr(mlflow_client._initialized, 'value', False)
+    monkeypatch.setattr(mlflow_client._configured, 'value', False)
+    monkeypatch.setattr(mlflow_client, '_current_config', SimpleNamespace(
+        is_central_node=False, parent_run_id=None, child_run_id=None))
+    monkeypatch.setattr(mlflow_client, '_mlflow_client', MagicMock())
+    monkeypatch.setattr(mlflow_client, 'MlflowClient', MagicMock())
+    monkeypatch.setattr(mlflow_client, 'mlflow', MagicMock())
+    monkeypatch.setattr(mlflow_client, '_FL_RESTAPI_URL', None)
 
 
 def test_setup_mlflow():
@@ -19,40 +22,26 @@ def test_setup_mlflow():
     tracking_uri = "http://example.com"
     mlflow_client.setup_mlflow(tracking_uri)
     assert mlflow_client._initialized
-    assert mlflow_client.mlflow.get_tracking_uri() == tracking_uri
+    mlflow_client.mlflow.set_tracking_uri.assert_called_once_with(tracking_uri)
+    mlflow_client.MlflowClient.assert_called_once_with(tracking_uri=tracking_uri)
 
 
-def test_create_parent_run():
+@pytest.mark.parametrize('existing', [True, False])
+def test_create_parent_run(existing):
     mlflow_client._initialized.value = True
-    experiment_name = "test_experiment"
-    experiment_id = "test_experiment_id"
-    run_name = "test_run"
-    run_id = "test_run_id"
-
-    with patch(
-        "interfaces.mlflow_client._mlflow_client.get_experiment_by_name"
-    ) as mock_get_experiment_by_name:
-        with patch(
-            "interfaces.mlflow_client._mlflow_client.create_run"
-        ) as mock_create_run:
-            mock_get_experiment_by_name.return_value = Mock(
-                experiment_id="test_experiment_id"
-            )
-
-            info = Mock(experiment_id=experiment_id, run_id=run_id)
-            mock_create_run.return_value = Mock(info=info)
-
-            run_id, experiment_id = mlflow_client.create_parent_run(
-                run_name, experiment_name
-            )
-
-    mock_get_experiment_by_name.assert_called_once_with(experiment_name)
-    mock_create_run.assert_called_once_with(
-        experiment_id=experiment_id, run_name=run_name
-    )
-
-    assert run_id == "test_run_id"
-    assert experiment_id == "test_experiment_id"
+    backend = mlflow_client.mlflow
+    backend.get_experiment_by_name.return_value = SimpleNamespace(experiment_id='experiment') if existing else None
+    backend.create_experiment.return_value = 'experiment'
+    backend.start_run.return_value.info.run_id = 'parent'
+    assert mlflow_client.create_parent_run('run', 'test') == ('parent', 'experiment')
+    backend.get_experiment_by_name.assert_called_once_with('test')
+    if existing:
+        backend.create_experiment.assert_not_called()
+    else:
+        backend.create_experiment.assert_called_once_with('test')
+    backend.start_run.assert_called_once_with(
+        experiment_id='experiment', run_name='run',
+        tags={'mlflow.note.content': 'Federated Generative Training Run'})
 
 
 def test_create_child_run():
@@ -121,15 +110,15 @@ def test_clean_current_config():
     mlflow_client._current_config.parent_run_id = "test_parent_run_id"
     mlflow_client._current_config.child_run_id = "test_child_run_id"
 
-    with patch.object(mlflow_client._mlflow_client, "update_run") as mock_update_run:
+    with patch.object(mlflow_client._mlflow_client, "set_terminated") as mock_update_run:
         mlflow_client.clean_current_config()
 
     assert not mlflow_client._configured
     mock_update_run.assert_any_call(
-        mlflow_client._current_config.child_run_id, "FINISHED"
+        mlflow_client._current_config.child_run_id, status="FINISHED"
     )
     mock_update_run.assert_any_call(
-        mlflow_client._current_config.parent_run_id, "FINISHED"
+        mlflow_client._current_config.parent_run_id, status="FINISHED"
     )
 
 

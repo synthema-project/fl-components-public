@@ -69,7 +69,7 @@ async def test_configure(monkeypatch_env):
     """Tests that configure() correctly sets up MLflow and RabbitMQ."""
     with (
         patch(
-            "fl_server.main.mlflow_client.setup_mlflow", new_callable=AsyncMock
+            "fl_server.main.mlflow_client.setup_mlflow", new_callable=MagicMock
         ) as mock_setup_mlflow,
         patch(
             "fl_server.main.rabbitmq_client.setup_rabbitmq", return_value=AsyncMock

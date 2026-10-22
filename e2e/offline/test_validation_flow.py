@@ -64,11 +64,17 @@ def test_frozen_full_validation_flow(tmp_path, monkeypatch, fidelity):
     driver = LocalDriver()
     client.global_vars.update(node_name='ICH', use_case='AML', model_meta=None, SMPC_enabled=False, dp_config=None)
     m = model()
-    def evaluator(**kwargs):
-        assert len(kwargs['real_data']) == 96
-        assert len(kwargs['holdout_data']) == 24
-        assert len(kwargs['synth_data']) == 25
-        (Path(kwargs['output_folder']) / 'report.html').write_text('<html>Artificial evaluator result</html>')
+    evaluated = []
+    def discover(group, dataset_meta):
+        kind = group.rsplit('.', 1)[-1]
+        def evaluator(**kwargs):
+            assert len(kwargs['real_data']) == (24 if kind == 'utility' else 96)
+            assert len(kwargs['holdout_data']) == (0 if kind == 'utility' else 24)
+            assert len(kwargs['synth_data']) == 25
+            assert list(kwargs['real_data']) == list(kwargs['synth_data'])
+            evaluated.append(kind)
+            (Path(kwargs['output_folder']) / 'report.html').write_text('<html>Artificial evaluator result</html>')
+        return evaluator
     def subprocess_evaluation(args, **kwargs):
         validation_runner.evaluate(args[-1])
     objects = {}
@@ -87,8 +93,8 @@ def test_frozen_full_validation_flow(tmp_path, monkeypatch, fidelity):
          patch.object(client_mlflow, 'log_metrics'), \
          patch.object(client_mlflow, 'clean_current_config'), \
          patch.object(client_mlflow, 'upload_final_state', return_value={'model_id': 'trained', 'run_id': 'child'}) as upload, \
-         patch('fl_client.validation_runner.validator', return_value=evaluator), \
-         patch('fl_client.validation_runner.subprocess.run', side_effect=subprocess_evaluation), \
+         patch('model_store_interface.validation._discover_plugin', side_effect=discover), \
+         patch('fl_client.validation_runner.run_report_process', side_effect=subprocess_evaluation), \
          patch.object(requires, 'DataCatalogueClient') as catalogue, \
          patch('fl_client.utils.minio_loader._get_minio_client') as minio:
         catalogue.return_value.register_synthetic_pool.side_effect = lambda **kwargs: {'pool_id': kwargs['pool_id']}
@@ -106,6 +112,8 @@ def test_frozen_full_validation_flow(tmp_path, monkeypatch, fidelity):
         assert registration['n_samples'] == 25
         assert catalogue.return_value.register_pool_validation.call_count == (3 if fidelity else 2)
         assert {call.kwargs['metrics']['scope'] for call in catalogue.return_value.register_pool_validation.call_args_list} == ({'utility', 'privacy', 'fidelity'} if fidelity else {'utility', 'privacy'})
+        assert set(evaluated) == ({'utility', 'privacy', 'fidelity'} if fidelity else {'utility', 'privacy'})
+        assert all(not call.kwargs['metrics']['fallback'] for call in catalogue.return_value.register_pool_validation.call_args_list)
         csv = minio.return_value.put_object.call_args_list[2]
         assert csv.kwargs['tags']['validation_status'] == 'pending'
         assert minio.return_value.put_object.call_count == (6 if fidelity else 5)

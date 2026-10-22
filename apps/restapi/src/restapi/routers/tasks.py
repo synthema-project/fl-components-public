@@ -22,9 +22,9 @@ async def get_rabbitmqs() -> dict[str, AsyncRabbitMQClient]:
     rabbitmq_dispatch = config.obj.get("rabbitmq_dispatch")
     if not isinstance(rabbitmq_dispatch, AsyncRabbitMQClient):
         raise RuntimeError("RabbitMQ dispatch client not found")
-    rabbitmq_status = config.obj.get("rabbitmq_dispatch")
+    rabbitmq_status = config.obj.get("rabbitmq_status")
     if not isinstance(rabbitmq_status, AsyncRabbitMQClient):
-        raise RuntimeError("RabbitMQ dispatch client not found")
+        raise RuntimeError("RabbitMQ status client not found")
     return {"status": rabbitmq_status, "dispatch": rabbitmq_dispatch}
 
 

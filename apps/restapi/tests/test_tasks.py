@@ -152,7 +152,7 @@ async def test_cancel_task(async_client, async_session, rabbitmq, task_attrs):
         response = await async_client.put(f"/tasks/cancel/{task.id}")
         assert response.status_code == 200
 
-        assert rabbitmq[1].publish_message.called_once()
+        rabbitmq[1].publish_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio

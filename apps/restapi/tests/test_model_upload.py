@@ -259,49 +259,67 @@ def test_mlflow_router_exposes_authenticated_upload(monkeypatch):
     register.assert_called_once()
 
 
-def test_msi_submission_gmm_round_trip_through_mlflow_router(tmp_path, monkeypatch):
+def test_submission_bundle_round_trip_through_mlflow_router(tmp_path, monkeypatch):
+    """Exercise the MSI-compatible bundle contract without an example model/repo."""
     import mlflow
     from restapi import config
-    from restapi.routers.mlflow_router import router
-    workspace = Path(__file__).resolve().parents[4]
-    source = workspace / 'app-model_store-interface'
-    monkeypatch.syspath_prepend(str(source / 'src'))
-    monkeypatch.syspath_prepend(str(source / 'examples/01-core-simulation'))
-    from gmm_model import create_local_learner, create_aggregator
-    from model_store_interface import FederatedModel, submit_fl_model
-    from model_store_interface.publishers import web_service
+    module = tmp_path / 'upload_contract_model.py'
+    module.write_text("""
+class Learner:
+    def train_round(self):
+        return {"loss": 0.0}
+class Aggregator:
+    def aggregate_parameters(self, parameters):
+        return parameters
+""")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    class SubmissionEnvelope(mlflow.pyfunc.PythonModel):
+        def predict(self, context, model_input, params=None):
+            return model_input
+
+        def create_local_learner(self, dataset_meta=None):
+            from upload_contract_model import Learner
+            return Learner()
+
+        def create_aggregator(self):
+            from upload_contract_model import Aggregator
+            return Aggregator()
+
+    artifacts = {}
+    for name, filename, content in [
+        ('dataset_meta', 'dataset_meta.json', json.dumps({
+            'use_case': 'AML', 'variables': [{'name': 'age', 'datatype': 'Text'}]})),
+        ('evaluation_config', 'evaluation_config.json', json.dumps({
+            'utility_evaluation': {'clinical_variables': ['age']},
+            'privacy_evaluation': {'known_attributes': ['age'], 'sensitive_attributes': []}})),
+        ('license', 'LICENSE.txt', 'MIT'),
+    ]:
+        artifact = tmp_path / filename
+        artifact.write_text(content)
+        artifacts[name] = str(artifact)
+    folder = tmp_path / 'submission'
+    mlflow.pyfunc.save_model(str(folder), python_model=SubmissionEnvelope(),
+                            artifacts=artifacts, code_paths=[str(module)], pip_requirements=[])
     tracking = (tmp_path / 'registry').as_uri()
     monkeypatch.setattr(config, 'MLFLOW_BASE_URL', tracking)
     monkeypatch.setattr(config, 'MLFLOW_TRACKING_USERNAME', '')
     monkeypatch.setattr(config, 'MLFLOW_TRACKING_PASSWORD', '')
-    monkeypatch.setattr(web_service, 'KeycloakAuthClient', Mock(return_value=Mock(get_access_token=Mock(return_value='test'))))
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[require_authentication] = get_mock_user
-    def send(request):
-        with TestClient(app) as api:
-            response = api.post('/mlflow/models/upload', content=request.data, headers=dict(request.header_items()))
-        assert response.status_code == 201, response.text
-        return io.BytesIO(response.content)
-    monkeypatch.setattr(web_service.urllib.request, 'urlopen', send)
-    result = submit_fl_model(
-        model=FederatedModel(create_local_learner=create_local_learner,
-                             create_aggregator=create_aggregator, model_name='roundtrip-gmm'),
-        platform_url='http://testserver', username='test', password='test',
-        experiment_name='msi-roundtrip', use_case='AML', trained=False,
-        metadata_path=str(workspace / 'personal-testing/fixtures/dataset-meta.json'),
-        evaluation_config_path=str(source / 'examples/shared_data/aml_dataset_evaluation_config.json'),
-        license_path=str(source / 'LICENSE'),
-        code_paths=[str(source / 'examples/01-core-simulation/gmm_model.py')],
-        pip_requirements=['mlflow-skinny==2.19.0'],
-    )
+    bundle = archive({p.relative_to(folder).as_posix(): p.read_bytes()
+                      for p in folder.rglob('*') if p.is_file()})
+    response = post(client(), bundle)
+    assert response.status_code == 201, response.text
+    result = response.json()
     assert result['model_version'] == '1'
-    client = mlflow.tracking.MlflowClient(tracking_uri=tracking, registry_uri=tracking)
-    saved = client.download_artifacts(result['run_id'], 'model')
-    loaded = mlflow.pyfunc.load_model(saved).unwrap_python_model()
-    assert callable(loaded.create_local_learner().train_round)
-    assert callable(loaded.create_aggregator().aggregate_parameters)
-    assert (Path(saved) / 'artifacts/aml_dataset_evaluation_config.json').exists()
+    registry = mlflow.tracking.MlflowClient(tracking_uri=tracking, registry_uri=tracking)
+    saved = Path(registry.download_artifacts(result['run_id'], 'model'))
+    # Loading happens on the worker side, after the API has preserved the bundle.
+    loaded = mlflow.pyfunc.load_model(str(saved)).unwrap_python_model()
+    assert loaded.create_local_learner().train_round() == {'loss': 0.0}
+    assert loaded.create_aggregator().aggregate_parameters([1, 2]) == [1, 2]
+    assert (saved / 'code' / module.name).is_file()
+    for artifact in artifacts.values():
+        assert (saved / 'artifacts' / Path(artifact).name).read_bytes() == Path(artifact).read_bytes()
 
 
 @pytest.mark.parametrize('fail', [False, True])

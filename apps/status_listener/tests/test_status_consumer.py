@@ -1,5 +1,4 @@
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 from status_listener.status_consumer import (
@@ -25,7 +24,7 @@ async def test_process_status_update():
         await process_status_update(mock_message)
 
     mock_task.change_status.assert_called_once_with("success")
-    mock_session.commit.assert_called_once()
+    mock_session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -43,13 +42,7 @@ async def test_process_status_update_invalid_message():
 async def test_consume_status_updates():
     """Test that `consume_status_updates` listens for RabbitMQ messages and processes them."""
     mock_rabbitmq_client = AsyncMock()
-    mock_rabbitmq_client.listen_with_callback = AsyncMock()
 
     with patch("status_listener.status_consumer.rabbitmq_client", mock_rabbitmq_client):
-        task = asyncio.create_task(consume_status_updates())
-
-        await asyncio.sleep(0.1)
-
-    # mock_rabbitmq_client.listen.assert_called()
-
-    task.cancel()
+        await consume_status_updates()
+    mock_rabbitmq_client.listen_forever.assert_awaited_once_with(process_status_update)
