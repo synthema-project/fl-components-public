@@ -107,6 +107,47 @@ def test_stack_monitor_failure_is_visible_without_exception_values(tmp_path, mon
     assert 'patient-secret' not in text
 
 
+def test_evaluator_exit_does_not_wait_for_worker_output_handles(tmp_path, caplog):
+    import time
+    code = """
+import subprocess, sys
+worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+print('private-patient-value', flush=True)
+sys.exit(7)
+"""
+    started = time.monotonic()
+    with pytest.raises(runner.subprocess.CalledProcessError) as error:
+        runner.run_report_process([runner.sys.executable, '-c', code], timeout=5)
+    assert error.value.returncode == 7
+    assert time.monotonic() - started < 5
+    assert 'exit_code=7' in caplog.text
+    assert 'process group cleaned up' in caplog.text
+    assert 'private-patient-value' not in caplog.text
+
+
+def test_evaluator_signal_exit_is_reported(caplog):
+    import signal
+    with pytest.raises(runner.subprocess.CalledProcessError) as error:
+        runner.run_report_process([runner.sys.executable, '-c',
+                                   'import os, signal; os.kill(os.getpid(), signal.SIGKILL)'], timeout=5)
+    assert error.value.returncode == -signal.SIGKILL
+    assert 'signal=9 (SIGKILL)' in caplog.text
+
+
+def test_evaluator_timeout_stops_process_group(caplog):
+    with pytest.raises(runner.subprocess.TimeoutExpired):
+        runner.run_report_process([runner.sys.executable, '-c', 'import time; time.sleep(60)'], timeout=0.1)
+    assert 'process group cleaned up' in caplog.text
+    assert 'Validation container memory after evaluation' in caplog.text
+
+
+def test_memory_counters_read_oom_events_and_limit(tmp_path):
+    (tmp_path / 'memory.events').write_text('oom 2\noom_kill 1\n')
+    (tmp_path / 'memory.max').write_text('max\n')
+    assert runner.memory_counters(tmp_path) == {
+        'memory.events.oom': 2, 'memory.events.oom_kill': 1, 'memory.max': 'max'}
+
+
 def test_msi_helpers_receive_exact_flower_partition_roles_and_unmodified_html(tmp_path, monkeypatch):
     setup_work(tmp_path)
     monkeypatch.delenv('FIDELITY_ENABLED', raising=False)
@@ -231,7 +272,7 @@ def test_publication_uses_original_partitions_and_original_report_content(tmp_pa
         assert pd.read_pickle(work / 'test.pkl').age.tolist() == [3, 4]
         (work / 'utility.html').write_text('<html>Original MSI report</html>')
         (work / 'results.json').write_text(json.dumps([{'kind': 'utility', 'fallback': True}]))
-    monkeypatch.setattr(runner.subprocess, 'run', subprocess_run)
+    monkeypatch.setattr(runner, 'run_report_process', subprocess_run)
     state = {'model_meta': metadata, 'node_name': 'ICH',
              'prepared_partitions': {role: pd.DataFrame({'encoded_feature': [100, 200]})
                                      for role in ('train', 'test')},

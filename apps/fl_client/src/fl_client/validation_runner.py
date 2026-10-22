@@ -3,6 +3,7 @@ import importlib.metadata
 import json
 import logging
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -17,6 +18,61 @@ def progress(work, stage, status):
     """Only emit our own stage labels; evaluator output may contain patient data."""
     with (work / 'progress.jsonl').open('a') as stream:
         stream.write(json.dumps({'stage': stage, 'status': status}) + '\n')
+
+
+def memory_counters(root=Path('/sys/fs/cgroup')):
+    """Container-scoped Linux counters; no process environment or dataset content."""
+    counters = {}
+    for name in ('memory.current', 'memory.peak', 'memory.max', 'memory.events',
+                 'memory/memory.usage_in_bytes', 'memory/memory.limit_in_bytes',
+                 'memory/memory.failcnt', 'memory/memory.oom_control'):
+        try:
+            for line in (root / name).read_text().splitlines():
+                fields = line.split()
+                key, value = (name, fields[0]) if len(fields) == 1 else (f'{name}.{fields[0]}', fields[1])
+                if value.isdigit() or value == 'max':
+                    counters[key] = int(value) if value.isdigit() else value
+        except OSError:
+            pass
+    return counters
+
+
+def run_report_process(command, timeout):
+    """Reap the evaluator directly, without waiting for inherited output pipes."""
+    logger = logging.getLogger(__name__)
+    before = memory_counters()
+    logger.warning('Validation container memory before evaluation: %s', before or 'unavailable')
+    # Regular temporary files cannot keep wait() blocked when workers inherit them.
+    # Raw output stays private and is discarded after byte counts are recorded.
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        process = subprocess.Popen(command, stdout=stdout, stderr=stderr, start_new_session=True)
+        logger.warning('Validation evaluator launched: pid=%s process_group=%s', process.pid, process.pid)
+        try:
+            code = process.wait(timeout=timeout)
+            if code < 0:
+                logger.warning('Validation evaluator exited: pid=%s signal=%s (%s)',
+                               process.pid, -code, signal.Signals(-code).name)
+            else:
+                logger.warning('Validation evaluator exited: pid=%s exit_code=%s', process.pid, code)
+            if code:
+                raise subprocess.CalledProcessError(code, command)
+        finally:
+            # This isolated process group belongs exclusively to this evaluation.
+            # Reap a timed-out evaluator and stop any inherited joblib workers.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+                logger.warning('Validation evaluator process group cleaned up: %s', process.pid)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            after = memory_counters()
+            events = {key: value - before[key] for key, value in after.items()
+                      if key in before and isinstance(value, int) and isinstance(before[key], int)
+                      and ('memory.events.' in key or key.endswith('failcnt') or key.endswith('oom_kill'))}
+            logger.warning('Validation container memory after evaluation: %s; event deltas=%s '
+                           '(container-wide, not proof of which process was killed)', after or 'unavailable', events)
+            logger.warning('Validation captured output bytes: stdout=%s stderr=%s (content withheld)',
+                           os.fstat(stdout.fileno()).st_size, os.fstat(stderr.fileno()).st_size)
 
 
 def process_snapshot(pid, proc=Path('/proc')):
@@ -258,9 +314,8 @@ def generate_reports(pool_id, object_uri, use_case, state):
         logging.getLogger(__name__).warning('Validation subprocess starting for node %s', state['node_name'])
         monitor.start()
         try:
-            subprocess.run([sys.executable, '-m', 'fl_client.validation_runner', str(work)],
-                           check=True, timeout=int(os.getenv('VALIDATION_TIMEOUT_SECONDS', '1500')),
-                           capture_output=True, text=True)
+            run_report_process([sys.executable, '-m', 'fl_client.validation_runner', str(work)],
+                               timeout=int(os.getenv('VALIDATION_TIMEOUT_SECONDS', '1500')))
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             # Never transmit raw evaluator stdout/stderr or exception messages:
             # third-party validators can include patient values in them.
@@ -270,7 +325,9 @@ def generate_reports(pool_id, object_uri, use_case, state):
                 failure = json.loads((work / 'failure.json').read_text())
                 detail = f"{failure['kind']} evaluator: {failure['type']}; location: {failure['location']}"
             else:
-                detail = f'evaluator process exited with status {error.returncode} before producing diagnostics'
+                detail = (f'evaluator terminated by {signal.Signals(-error.returncode).name}'
+                          if error.returncode < 0 else f'evaluator process exited with status {error.returncode}')
+                detail += ' before producing diagnostics; check process and container memory logs'
             raise RuntimeError('Validation failed: ' + detail) from error
         finally:
             stop.set()
