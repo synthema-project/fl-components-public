@@ -1,4 +1,3 @@
-import threading
 from collections import OrderedDict
 from flwr.common import Message
 import structlog
@@ -190,11 +189,14 @@ def get_peer_discovery_if(msg: Message, global_vars: dict) -> Message:
         min_peers=config['min_peers'],
         max_discovery_time=config['max_discovery_time'],)
 
-    # Start discovery in a separate thread
-    discovery_thread = threading.Thread(
-        target=discovery_service.start_discovery)
-    discovery_thread.start()
-    discovery_thread.join()
+    try:
+        if not discovery_service.start_discovery():
+            raise RuntimeError(
+                f"SMPC discovery found {discovery_service.get_peer_count()} peers; "
+                f"expected {config['min_peers']}. Check pod labels and client readiness."
+            )
+    finally:
+        discovery_service.shutdown()
     discovered_peers = discovery_service.get_peer_addresses()
     discovered_peers_ids = discovery_service.get_peer_ids()
     logger.info(f"Discovered {len(discovered_peers)} peers: {discovered_peers}")

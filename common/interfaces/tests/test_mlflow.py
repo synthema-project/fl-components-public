@@ -140,12 +140,13 @@ def test_load_mlflow_model():
     mlflow_client._current_config.model_name = "test_model_name"
     mlflow_client._current_config.model_version = 1
 
-    with patch("interfaces.mlflow_client._load_model") as mock_load_model:
+    with patch("interfaces.mlflow_client._load_model") as mock_load_model, \
+         patch("mlflow.artifacts.download_artifacts", return_value="/tmp/downloaded-model"), \
+         patch("interfaces.model_environment.install_model_dependencies") as provision:
         mlflow_client.load_model()
+        provision.assert_called_once_with("/tmp/downloaded-model")
 
-    mock_load_model.assert_called_once_with(
-        f"models:/{mlflow_client._current_config.model_name}/{mlflow_client._current_config.model_version}"
-    )
+    mock_load_model.assert_called_once_with("/tmp/downloaded-model")
 
 
 def test_upload_final_state():

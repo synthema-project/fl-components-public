@@ -32,7 +32,7 @@ class TaskBase(SQLModel):
     num_global_iterations: int = Field(nullable=False)
     run_name: str = Field(nullable=False)
     experiment_name: str = Field(nullable=False)
-    SMPC_enabled: bool = Field(default=True)
+    SMPC_enabled: bool = Field(default=False)
     dp_mode: Optional[str] = Field(default=None)
     noise_multiplier: Optional[int] = Field(default=None)
     clipping_norm: Optional[int] = Field(default=None)

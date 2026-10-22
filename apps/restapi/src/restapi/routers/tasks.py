@@ -65,7 +65,7 @@ async def create_task(
     current_user: UserClaims = Depends(require_authentication),
 ) -> TaskRead:
     try:
-        # Ignore client-supplied snapshots: resolve and persist server-side at submission.
+        task = TaskCreate.model_validate(task.model_dump())
         task.validation_snapshot = None
         profile = os.getenv('VALIDATION_PROFILE', 'none')
         if profile in {'aml-full', 'scd-full'}:

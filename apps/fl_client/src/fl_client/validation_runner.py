@@ -1,15 +1,138 @@
-"""Run genuine MSI-compatible validators locally; never accept fallback reports."""
-import base64
-import html
+"""Run the MSI simulation reporting workflow and publish its HTML artifacts."""
 import importlib.metadata
 import json
-import mimetypes
+import logging
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import traceback
+from interfaces.validation_policy import required_reports
+
+
+def progress(work, stage, status):
+    """Only emit our own stage labels; evaluator output may contain patient data."""
+    with (work / 'progress.jsonl').open('a') as stream:
+        stream.write(json.dumps({'stage': stage, 'status': status}) + '\n')
+
+
+def process_snapshot(pid, proc=Path('/proc')):
+    """Read Linux process counters, including children spawned by worker threads."""
+    pending, result = [pid], {}
+    ticks = os.sysconf('SC_CLK_TCK')
+    page_size = os.sysconf('SC_PAGE_SIZE')
+    while pending:
+        current = pending.pop()
+        if current in result:
+            continue
+        try:
+            directory = proc / str(current)
+            # comm can contain spaces/parentheses; fields after its final ')' are fixed.
+            fields = (directory / 'stat').read_text().rsplit(')', 1)[1].split()
+            result[current] = {
+                'state': fields[0], 'cpu': (int(fields[11]) + int(fields[12])) / ticks,
+                'threads': int(fields[17]), 'rss_mib': int(fields[21]) * page_size / 1048576,
+                'start': fields[19],
+            }
+            for children in directory.glob('task/*/children'):
+                try:
+                    pending.extend(int(value) for value in children.read_text().split())
+                except OSError:
+                    pass  # A worker may exit while we inspect it.
+        except (OSError, ValueError, IndexError):
+            continue
+    return result
+
+
+def log_process_activity(work, previous, seconds):
+    logger = logging.getLogger(__name__)
+    try:
+        pid = int((work / 'evaluator.pid').read_text())
+        snapshot = process_snapshot(pid)
+    except (OSError, ValueError):
+        logger.warning('Validation process diagnostics unavailable: evaluator PID not recorded yet')
+        return previous
+    if not snapshot:
+        logger.warning('Validation evaluator PID %s unavailable in /proc; process may have exited', pid)
+        return {}
+    cpu_delta = 0
+    for current, stats in sorted(snapshot.items()):
+        old = previous.get(current)
+        delta = max(0, stats['cpu'] - old['cpu']) if old and old['start'] == stats['start'] else None
+        cpu_delta += delta or 0
+        logger.warning('Validation process pid=%s role=%s state=%s threads=%s rss_mib=%.1f '
+                       'cpu_total_s=%.2f cpu_delta_s=%s',
+                       current, 'evaluator' if current == pid else 'worker', stats['state'],
+                       stats['threads'], stats['rss_mib'], stats['cpu'],
+                       'first sample' if delta is None else f'{delta:.2f}')
+    logger.warning('Validation process summary: processes=%s sampled_cpu_delta_s=%.2f interval_s=%.1f '
+                   '(R=running, S=sleeping/waiting, D=uninterruptible wait, Z=zombie; '
+                   'RSS includes shared pages)', len(snapshot), cpu_delta, seconds)
+    return snapshot
+
+
+def monitor_progress(work, stop, interval=1, heartbeat=30):
+    logger = logging.getLogger(__name__)
+    started = last_update = time.monotonic()
+    stage = 'starting subprocess'
+    offset = 0
+    last_event = started
+    previous = {}
+    while True:
+        path = work / 'progress.jsonl'
+        if path.exists():
+            with path.open() as stream:
+                stream.seek(offset)
+                while True:
+                    line = stream.readline()
+                    if not line.endswith('\n'):
+                        break
+                    event = json.loads(line)
+                    last_event = time.monotonic()
+                    if event['stage'] != 'evaluator stack':
+                        stage = event['stage']
+                    logger.warning('Validation progress: %s %s (elapsed %.1fs)',
+                                   event['stage'], event['status'], time.monotonic() - started)
+                    offset = stream.tell()
+        now = time.monotonic()
+        if now - last_update >= heartbeat:
+            logger.warning('Validation parent waiting: last stage=%s, elapsed %.1fs, '
+                           'seconds since evaluator progress=%.1f', stage, now - started, now - last_event)
+            if os.getenv('VALIDATION_DEBUG_STACKS', '').lower() == 'true':
+                previous = log_process_activity(work, previous, now - last_update)
+            last_update = now
+        if stop.is_set():
+            break
+        stop.wait(interval)
+
+
+def monitor_evaluator_stacks(work, stop, interval=60):
+    try:
+        sample_evaluator_stacks(work, stop, interval)
+    except Exception as error:
+        # Report only the diagnostic failure type, not captured exception text.
+        progress(work, 'stack diagnostics', f'failed ({type(error).__name__})')
+
+
+def sample_evaluator_stacks(work, stop, interval):
+    """Sample function locations only, never locals, source text or exception values."""
+    own_thread = threading.get_ident()
+    while not stop.wait(interval):
+        stacks = set()
+        for thread_id, frame in sys._current_frames().items():
+            if thread_id == own_thread:
+                continue
+            locations = []
+            while frame is not None and len(locations) < 8:
+                locations.append(f'{Path(frame.f_code.co_filename).name}:{frame.f_lineno} ({frame.f_code.co_name})')
+                frame = frame.f_back
+            stacks.add(' <- '.join(locations))
+        # Unique stacks expose nested parallel fitting without hundreds of repeats.
+        for stack in sorted(stacks):
+            progress(work, 'evaluator stack', stack)
 
 
 def validator(kind, use_case):
@@ -26,88 +149,175 @@ def validator(kind, use_case):
     raise RuntimeError(f'No installed {use_case} {kind} validator; report generation cannot complete')
 
 
-def standalone_report(folder):
-    """Bundle HTML and local assets into one authenticated, portable document."""
-    folder = Path(folder).resolve()
-    reports = sorted(folder.rglob('*.html'))
-    if not reports:
-        raise RuntimeError('Evaluator did not generate an HTML report')
-    sections = []
-    for report in reports:
-        def embed(match):
-            attr, quote, uri = match.groups()
-            if uri.startswith(('https://', 'http://', 'data:', '#', '//')):
-                return match.group(0)
-            asset = (report.parent / uri).resolve()
-            if not asset.is_relative_to(folder) or not asset.is_file():
-                raise RuntimeError('Report references an unavailable local asset')
-            mime = mimetypes.guess_type(asset.name)[0] or 'application/octet-stream'
-            return f'{attr}={quote}data:{mime};base64,{base64.b64encode(asset.read_bytes()).decode()}{quote}'
-        content = report.read_text()
-        content = re.sub(r'''(src|href)=(["'])(.*?)\2''', embed, content)
-        sections.append('<h2>' + html.escape(report.stem) + '</h2><iframe sandbox="allow-scripts" '
-                        'style="width:100%;height:90vh;border:0" srcdoc="' + html.escape(content, quote=True) + '"></iframe>')
-    return '<!doctype html><html><head><meta charset="utf-8"></head><body>' + ''.join(sections) + '</body></html>'
+def report_file(result):
+    """Resolve MSI's file-or-output-directory return without rewriting HTML."""
+    path = Path(result)
+    if path.is_file():
+        return path
+    if path.is_dir():
+        for name in ('report.html', 'index.html'):
+            if (path / name).is_file():
+                return path / name
+        reports = sorted(path.rglob('*.html'))
+        if len(reports) == 1:
+            return reports[0]
+        raise RuntimeError(f'MSI returned a report directory with {len(reports)} HTML files and no report.html or index.html')
+    raise RuntimeError('MSI did not return an existing report file or directory')
 
 
 def evaluate(work):
+    work = Path(work)
+    progress(work, 'input preparation', 'started')
     import pandas as pd
+    from model_store_interface.metadata.models.model import SynthemaDatasetModel
+    from model_store_interface import validation
     work = Path(work)
     payload = json.loads((work / 'configuration.json').read_text())
-    metadata, configuration = payload['metadata'], payload['evaluation']
-    frames = {name: pd.read_pickle(work / f'{name}.pkl') for name in ('real', 'synthetic', 'holdout')}
-    expected = {v['name'] for v in metadata['variables']}
+    dataset_model = SynthemaDatasetModel.model_validate(payload['dataset_meta'])
+    frames = {name: pd.read_pickle(work / f'{name}.pkl')
+              for name in ('train', 'test', 'synthetic')}
+    if (work / 'val.pkl').exists():
+        frames['val'] = pd.read_pickle(work / 'val.pkl')
+    # Source CSVs can contain fields outside the generated dataset schema.
+    # Give both MSI evaluators the same original features, in metadata order.
+    columns = [variable.name for variable in dataset_model.metadata.variables]
     for name, frame in frames.items():
-        if frame.empty or not expected.issubset(frame.columns):
-            raise ValueError(f'{name} data does not match the configured evaluation schema')
+        missing = [column for column in columns if column not in frame.columns]
+        if missing:
+            raise ValueError(f'Validation {name} partition is missing metadata columns: {missing}')
+        if frame.columns.duplicated().any():
+            raise ValueError(f'Validation {name} partition contains duplicate columns')
+        frames[name] = frame.loc[:, columns].copy()
+    # Keep MSI Flower simulation's partition roles, using original feature data.
+    val = frames.get('val', pd.DataFrame(columns=columns))
+    progress(work, 'input preparation', 'completed')
     results = []
-    for kind in ('utility', 'privacy', 'fidelity'):
-        function = validator(kind, payload['use_case'])
+    for kind in required_reports():
+        (work / 'stage.json').write_text(json.dumps({'kind': kind}))
+        function = getattr(validation, f'validate_{kind}_report')
         folder = work / kind
         folder.mkdir()
-        config = json.loads(json.dumps(configuration))
-        if kind == 'privacy':
-            config.setdefault('privacy_evaluation', {})['format'] = 'html'
-        function(real_data=frames['real'], synth_data=frames['synthetic'],
-                 holdout_data=frames['holdout'], metadata=metadata,
-                 evaluation_config=config, output_folder=str(folder))
-        (work / f'{kind}.html').write_text(standalone_report(folder))
-        results.append(kind)
+        utility = kind == 'utility'
+        failures = []
+        class CaptureFailure(logging.Handler):
+            def emit(self, record):
+                args = record.args if isinstance(record.args, tuple) else ()
+                for error in args:
+                    if isinstance(error, Exception):
+                        frames = traceback.extract_tb(error.__traceback__)
+                        failures.append({'type': type(error).__name__, 'location': ' -> '.join(
+                            f'{Path(frame.filename).name}:{frame.lineno} ({frame.name})' for frame in frames[-5:])})
+        handler = CaptureFailure()
+        msi_logger = logging.getLogger(validation.__name__)
+        msi_logger.addHandler(handler)
+        try:
+            progress(work, kind, 'started')
+            result = function(
+                synthetic_data=frames['synthetic'],
+                real_data=frames['test'] if utility else frames['train'],
+                holdout_data=val if utility else frames['test'],
+                dataset_meta=dataset_model, output_folder=str(folder),
+                node_id=payload['node_id'],
+            )
+        finally:
+            msi_logger.removeHandler(handler)
+        source = report_file(result)
+        (work / f'{kind}.html').write_bytes(source.read_bytes())
+        entry = {'kind': kind, 'fallback': source.name == f'{kind}_fallback.html'}
+        if failures:
+            entry['evaluator_failures'] = failures
+        results.append(entry)
+        progress(work, kind, 'completed (MSI fallback)' if entry['fallback'] else 'completed')
     (work / 'results.json').write_text(json.dumps(results))
 
 
 def generate_reports(pool_id, object_uri, use_case, state):
     import pandas as pd
-    from fl_client.metadata_contract import documents
     from fl_client.utils.minio_loader import download_object, upload_pool_report
     if os.getenv('VALIDATION_PROFILE') != use_case.lower() + '-full':
         raise ValueError('Reporting image does not match task disease')
+    # Synthetic output and metadata use the original feature schema. Model
+    # encodings are for training, not inputs to the metadata-aware validators.
     partitions = state['data_partitions']
     if 'test' not in partitions:
         raise ValueError('Privacy evaluation requires an independent test partition')
-    metadata, evaluation = documents(state['model_meta'])
     synthetic = pd.read_csv(download_object(object_uri))
     with tempfile.TemporaryDirectory(prefix='pool-validation-') as directory:
         work = Path(directory)
         # Pickles are created and consumed only in this private temporary directory.
-        for name, frame in [('real', partitions['train']), ('holdout', partitions['test']), ('synthetic', synthetic)]:
+        for name, frame in [('train', partitions['train']), ('test', partitions['test']), ('synthetic', synthetic)]:
             frame.to_pickle(work / f'{name}.pkl')
-        (work / 'configuration.json').write_text(json.dumps({'metadata': metadata, 'evaluation': evaluation, 'use_case': use_case}))
+        if 'val' in partitions:
+            partitions['val'].to_pickle(work / 'val.pkl')
+        (work / 'configuration.json').write_text(json.dumps({
+            'dataset_meta': state['model_meta'].model_dump(mode='json'),
+            'node_id': state['node_name'],
+        }))
+        stop = threading.Event()
+        monitor = threading.Thread(target=monitor_progress, args=(work, stop), daemon=True)
+        logging.getLogger(__name__).warning('Validation subprocess starting for node %s', state['node_name'])
+        monitor.start()
         try:
             subprocess.run([sys.executable, '-m', 'fl_client.validation_runner', str(work)],
                            check=True, timeout=int(os.getenv('VALIDATION_TIMEOUT_SECONDS', '1500')),
                            capture_output=True, text=True)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-            # Do not transmit evaluator output that may contain patient records.
-            raise RuntimeError('Validation failed; check evaluator compatibility, configuration and input types') from error
+            # Never transmit raw evaluator stdout/stderr or exception messages:
+            # third-party validators can include patient values in them.
+            if isinstance(error, subprocess.TimeoutExpired):
+                detail = 'evaluator timed out'
+            elif (work / 'failure.json').is_file():
+                failure = json.loads((work / 'failure.json').read_text())
+                detail = f"{failure['kind']} evaluator: {failure['type']}; location: {failure['location']}"
+            else:
+                detail = f'evaluator process exited with status {error.returncode} before producing diagnostics'
+            raise RuntimeError('Validation failed: ' + detail) from error
+        finally:
+            stop.set()
+            monitor.join()
+        logging.getLogger(__name__).warning('Validation subprocess completed; uploading reports')
         reports = []
-        for kind in json.loads((work / 'results.json').read_text()):
+        for result in json.loads((work / 'results.json').read_text()):
+            kind, fallback = result['kind'], result['fallback']
+            if fallback:
+                logging.getLogger(__name__).warning(
+                    'MSI %s report is a fallback; evaluator diagnostics: %s',
+                    kind, result.get('evaluator_failures', 'No evaluator exception captured; check plugin discovery'))
             uri = upload_pool_report((work / f'{kind}.html').read_text(), object_uri=object_uri,
                                      pool_id=pool_id, node_name=state['node_name'], kind=kind)
-            reports.append({'report_uri': uri, 'metrics': {'scope': kind, 'fallback': False,
-                            'privacy_evaluated': kind == 'privacy', 'provider': 'synth_privacy' if kind == 'privacy' else 'msi-plugin'}})
+            logging.getLogger(__name__).warning('Validation %s report uploaded', kind)
+            reports.append({'report_uri': uri, 'metrics': {'scope': kind, 'fallback': fallback,
+                            'privacy_evaluated': kind == 'privacy' and not fallback, 'provider': 'msi-simulation'}})
     return {'node_name': state['node_name'], 'reports': reports}
 
 
+def run_evaluation(work):
+    """Persist code locations, never exception text, values, or source lines."""
+    work = Path(work)
+    (work / 'evaluator.pid').write_text(str(os.getpid()))
+    stop = threading.Event()
+    monitor = None
+    if os.getenv('VALIDATION_DEBUG_STACKS', '').lower() == 'true':
+        monitor = threading.Thread(target=monitor_evaluator_stacks, args=(work, stop), daemon=True)
+        monitor.start()
+    try:
+        evaluate(work)
+    except Exception as error:
+        stage = json.loads((work / 'stage.json').read_text()) if (work / 'stage.json').exists() else {}
+        progress(work, stage.get('kind', 'input preparation'), 'failed')
+        frames = traceback.extract_tb(error.__traceback__)
+        location = ' -> '.join(f'{Path(frame.filename).name}:{frame.lineno} ({frame.name})'
+                               for frame in frames[-5:])
+        (work / 'failure.json').write_text(json.dumps({
+            'kind': stage.get('kind', 'input preparation'),
+            'type': type(error).__name__, 'location': location,
+        }))
+        raise
+    finally:
+        stop.set()
+        if monitor is not None:
+            monitor.join()
+
+
 if __name__ == '__main__':
-    evaluate(sys.argv[1])
+    run_evaluation(sys.argv[1])

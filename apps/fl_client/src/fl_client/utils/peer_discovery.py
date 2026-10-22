@@ -6,8 +6,8 @@ import json
 import uuid
 import os
 import requests
+from pathlib import Path
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Constants for discovery
@@ -19,8 +19,17 @@ DISCOVERY_TIMEOUT = 30  # seconds
 # Kubernetes related constants
 KUBERNETES_SERVICE_HOST = os.environ.get('KUBERNETES_SERVICE_HOST')
 IS_KUBERNETES = KUBERNETES_SERVICE_HOST is not None
-K8S_NAMESPACE = os.environ.get('POD_NAMESPACE', 'default')
+def pod_namespace():
+    configured = os.environ.get('POD_NAMESPACE')
+    if configured:
+        return configured
+    namespace_file = Path('/var/run/secrets/kubernetes.io/serviceaccount/namespace')
+    return namespace_file.read_text().strip() if namespace_file.exists() else 'default'
+
+
+K8S_NAMESPACE = pod_namespace()
 K8S_APP_LABEL = os.environ.get('APP_LABEL', 'fl-client')
+K8S_LABEL_SELECTOR = os.environ.get('PEER_LABEL_SELECTOR', f'app={K8S_APP_LABEL}')
 K8S_API_URL = f"https://{KUBERNETES_SERVICE_HOST}:443" if IS_KUBERNETES else ""
 
 class PeerDiscovery:
@@ -49,6 +58,7 @@ class PeerDiscovery:
 
         # Dictionary to store discovered peers {client_id: ip_address:port}
         self.peers = {}
+        self.discovery_error = None
         self.discovery_complete = threading.Event()
         self.shutdown_flag = threading.Event()
 
@@ -88,9 +98,12 @@ class PeerDiscovery:
         start_time = time.time()
         while (len(self.peers) < self.min_peers and
                time.time() - start_time < self.max_discovery_time and
-               not self.shutdown_flag.is_set()):
-            time.sleep(1)
+               not self.shutdown_flag.is_set() and not self.discovery_error):
+            self.discovery_complete.wait(timeout=1)
 
+        if self.discovery_error:
+            self.discovery_complete.set()
+            raise RuntimeError(self.discovery_error)
         if len(self.peers) >= self.min_peers:
             logger.info(f"Discovery complete, found {len(self.peers)} peers: {self.peers}")
             self.discovery_complete.set()
@@ -194,7 +207,9 @@ class PeerDiscovery:
         ca_cert_path = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
 
         if not os.path.exists(token_path) or not os.path.exists(ca_cert_path):
-            logger.error("Kubernetes service account token or CA cert not found")
+            self.discovery_error = "SMPC discovery requires a mounted Kubernetes service account token and CA certificate"
+            self.discovery_complete.set()
+            logger.error(self.discovery_error)
             return
 
         with open(token_path, 'r') as f:
@@ -214,10 +229,18 @@ class PeerDiscovery:
                 response = requests.get(
                     url,
                     headers=headers,
-                    params={'labelSelector': f'app={K8S_APP_LABEL}'},
-                    verify=ca_cert_path
+                    params={'labelSelector': K8S_LABEL_SELECTOR},
+                    verify=ca_cert_path,
+                    timeout=5
                 )
 
+                if response.status_code in (401, 403):
+                    self.discovery_error = (
+                        f"SMPC discovery cannot list pods in namespace {K8S_NAMESPACE} "
+                        f"(HTTP {response.status_code}); check the client service account and namespace RoleBinding"
+                    )
+                    self.discovery_complete.set()
+                    return
                 if response.status_code != 200:
                     logger.error(f"Failed to get pods: {response.status_code} {response.text}")
                     time.sleep(DISCOVERY_INTERVAL)

@@ -299,8 +299,9 @@ def load_model() -> PyFuncModel:
     Returns:
         PyFuncModel: The loaded model.
     """
-    model: PyFuncModel = _load_model(
-        f"models:/{_current_config.model_name}/{_current_config.model_version}"
+    from interfaces.model_environment import load_model_with_dependencies
+    model: PyFuncModel = load_model_with_dependencies(
+        f"models:/{_current_config.model_name}/{_current_config.model_version}", _load_model
     )
     return model
 

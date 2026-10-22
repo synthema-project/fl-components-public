@@ -1,4 +1,5 @@
 from interfaces.catalogue_auth import catalogue_headers
+from interfaces.validation_policy import required_reports
 import requests
 import json
 from typing import Any, Dict, List, Optional, Tuple
@@ -118,6 +119,7 @@ class DataCatalogueClient:
                 "pool_id": pool_id,
                 "validation_phase": "awaiting_reports",
                 "validation_nodes": validation_nodes or [],
+                "required_reports": required_reports(),
                 "dataset_snapshot": dataset_snapshot,
                 "task_id": task_id,
                 "node_name": node_name,

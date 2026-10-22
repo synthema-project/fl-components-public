@@ -7,6 +7,8 @@ from flwr.common import Array, NDArray, ParametersRecord
 class Utils:
     @staticmethod
     def _basic_array_deserialisation(array: Array) -> NDArray:
+        if array.stype == "numpy.ndarray":
+            return array.numpy()
         return np.frombuffer(buffer=array.data, dtype=array.dtype).reshape(array.shape)
 
     @staticmethod

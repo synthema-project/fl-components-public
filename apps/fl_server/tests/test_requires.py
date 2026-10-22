@@ -34,6 +34,15 @@ def use_case():
     return "use_case"
 
 
+def test_long_validation_wait_has_sufficient_message_ttl(driver):
+    with patch.object(driver_utils, 'send_messages', return_value=['message']), \
+         patch.object(driver_utils, 'wait_messages', return_value=[]) as wait:
+        requires.execution_flow(driver=driver, node_ids=[1], recordset_factory=lambda: RecordSet(),
+                                msg_type=MessageType.QUERY, msg_group='validate_pool_test', timeout=7500)
+    assert driver.create_message.call_args.kwargs['ttl'] >= 7560
+    wait.assert_called_once_with(driver, ['message'], timeout=7500)
+
+
 def test_execution_flow(driver, node_ids):
     rs = RecordSet()
     recordset_factory_mock = MagicMock(return_value=rs)
@@ -375,3 +384,10 @@ def test_model_budget_collection_matches_msi_accountant_and_marks_partial(driver
         assert result['reported_nodes'] == 2
     else:
         assert result['model_reported_budget'] == {'epsilon': 3., 'delta': 1e-5}
+
+
+def test_empty_client_list_fails_before_sending_malformed_flower_request(driver):
+    with pytest.raises(RuntimeError, match='No Flower clients are registered'):
+        requires.execution_flow(driver, [], MessageType.QUERY, 'filter_message')
+    driver.push_messages.assert_not_called()
+    driver.create_message.assert_not_called()

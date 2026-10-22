@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import numpy as np
+import pytest
 from flwr.common import Context, Error, Message, Metadata, RecordSet
 from testing import configuration, create_partitions, model
 from interfaces.dataset_snapshot import select_snapshot
@@ -43,8 +44,10 @@ class LocalDriver:
 
 
 
-def test_frozen_full_validation_flow(tmp_path, monkeypatch):
+@pytest.mark.parametrize('fidelity', [False, True])
+def test_frozen_full_validation_flow(tmp_path, monkeypatch, fidelity):
     monkeypatch.setenv('VALIDATION_PROFILE', 'aml-full')
+    monkeypatch.setenv('FIDELITY_ENABLED', str(fidelity).lower())
     metadata, evaluation = configuration()
     paths = create_partitions(tmp_path)
     import hashlib
@@ -101,10 +104,10 @@ def test_frozen_full_validation_flow(tmp_path, monkeypatch):
         assert registration['dataset_snapshot'] == snapshot
         assert registration['validation_nodes'] == ['ICH']
         assert registration['n_samples'] == 25
-        assert catalogue.return_value.register_pool_validation.call_count == 3
-        assert {call.kwargs['metrics']['scope'] for call in catalogue.return_value.register_pool_validation.call_args_list} == {'utility', 'privacy', 'fidelity'}
+        assert catalogue.return_value.register_pool_validation.call_count == (3 if fidelity else 2)
+        assert {call.kwargs['metrics']['scope'] for call in catalogue.return_value.register_pool_validation.call_args_list} == ({'utility', 'privacy', 'fidelity'} if fidelity else {'utility', 'privacy'})
         csv = minio.return_value.put_object.call_args_list[2]
         assert csv.kwargs['tags']['validation_status'] == 'pending'
-        assert minio.return_value.put_object.call_count == 6
+        assert minio.return_value.put_object.call_count == (6 if fidelity else 5)
         assert all(call.kwargs['report_uri'].startswith('s3://synthetic-validation-reports/') for call in catalogue.return_value.register_pool_validation.call_args_list)
         assert 'validate_synthetic_pool' in driver.modes

@@ -1,6 +1,6 @@
 import pytest
 
-from schemas.task import Status, TaskRead
+from schemas.task import Status, TaskRead, TaskCreate
 
 
 @pytest.fixture
@@ -38,25 +38,25 @@ def test_task_change_status(task):
     assert task_db.status == Status.CANCELLED
 
 
-def test_smpc_enabled_without_platform_dp_by_default(task):
+def test_smpc_and_platform_dp_disabled_by_default(task):
     from schemas.task import TaskCreate
     request = TaskCreate.model_validate(task.model_dump())
     assert request.dp_mode is None
-    assert request.SMPC_enabled is True
+    assert request.SMPC_enabled is False
     assert request.noise_multiplier is None
     assert request.clipping_norm is None
 
 
 @pytest.mark.parametrize('mode', [None, 'central_dp', 'local_dp', 'None'])
 def test_original_task_dp_modes(task, mode):
-    request = TaskRead.model_validate({**task.model_dump(), 'dp_mode': mode, 'SMPC_enabled': False})
+    request = TaskCreate.model_validate({**task.model_dump(), 'dp_mode': mode, 'SMPC_enabled': False})
     assert request.dp_mode == (None if mode == 'None' else mode)
 
 
 def test_central_dp_smpc_combination_rejected(task):
     mode = 'central_dp'
     with pytest.raises(ValueError, match='SMPC cannot be enabled'):
-        TaskRead.model_validate({**task.model_dump(), 'dp_mode': mode, 'SMPC_enabled': True})
+        TaskCreate.model_validate({**task.model_dump(), 'dp_mode': mode, 'SMPC_enabled': True})
 
 
 def test_model_local_dp_allowed_with_smpc(task):
@@ -80,3 +80,28 @@ def test_default_created_at_matches_existing_postgres_timestamp(task):
     assert TaskRead.__table__.c.created_at.type.timezone is False
     import json
     assert json.loads(created.model_dump_json())['created_at'] == '2026-10-16T13:22:43.516492'
+
+
+def test_historical_invalid_security_settings_are_readable(task):
+    payload = {**task.model_dump(), 'dp_mode': 'central_dp', 'SMPC_enabled': True,
+               'status': Status.FAILED}
+    historical = TaskRead.model_validate(payload)
+    assert historical.dp_mode == 'central_dp'
+    assert historical.SMPC_enabled is True
+    assert TaskRead.model_validate_json(historical.model_dump_json()).dp_mode == 'central_dp'
+    with pytest.raises(ValueError, match='SMPC cannot be enabled'):
+        TaskCreate.model_validate(payload)
+
+
+def test_request_defaults_without_explicit_security_fields(task):
+    payload = task.model_dump(exclude={'SMPC_enabled', 'dp_mode', 'noise_multiplier', 'clipping_norm'})
+    request = TaskCreate.model_validate(payload)
+    assert request.SMPC_enabled is False
+    assert request.dp_mode is None
+    assert request.noise_multiplier is None
+    assert request.clipping_norm is None
+
+
+def test_smpc_can_be_explicitly_enabled(task):
+    request = TaskCreate.model_validate({**task.model_dump(), 'SMPC_enabled': True, 'dp_mode': None})
+    assert request.SMPC_enabled is True

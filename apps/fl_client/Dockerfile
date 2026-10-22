@@ -42,7 +42,8 @@ RUN python -c "from model_store_interface.step_zero import PlainStepZeroStrategy
 FROM ${BASE_IMAGE}:${CURRENT_VERSION} as runtime
 
 ARG VALIDATION_PROFILE=none
-ENV VALIDATION_PROFILE=${VALIDATION_PROFILE} MPLBACKEND=Agg
+ARG FIDELITY_ENABLED=false
+ENV VALIDATION_PROFILE=${VALIDATION_PROFILE} FIDELITY_ENABLED=${FIDELITY_ENABLED} MPLBACKEND=Agg
 
 WORKDIR /app
 
@@ -60,6 +61,6 @@ RUN python -m grpc_tools.protoc -I/app/src/fl_client --python_out=/app/src/fl_cl
 RUN sed -i 's/^import smpc_pb2 as smpc__pb2$/import fl_client.smpc_pb2 as smpc__pb2/' /app/src/fl_client/smpc_pb2_grpc.py
 
 RUN if [ "$VALIDATION_PROFILE" = "aml-full" ] || [ "$VALIDATION_PROFILE" = "scd-full" ]; then \
-      python -c 'import os; from fl_client.validation_runner import validator; disease=os.environ["VALIDATION_PROFILE"].split("-")[0]; [validator(kind, disease) for kind in ("utility", "privacy", "fidelity")]'; fi
+      python -c 'import os; from fl_client.validation_runner import validator; from interfaces.validation_policy import required_reports; disease=os.environ["VALIDATION_PROFILE"].split("-")[0]; [validator(kind, disease) for kind in required_reports()]'; fi
 
 CMD ["flower-client-app", "--insecure", "src.fl_client.main:app"]

@@ -32,7 +32,7 @@ def create_partitions(folder):
     frame = pd.DataFrame({'Age': rng.normal(50, 5, 120), 'HB': rng.normal(10, 1, 120),
                           'PLT': rng.normal(150, 10, 120), 'OS_Status': rng.integers(0, 2, 120)})
     paths = {}
-    for name, data in [('train', frame.iloc[:72]), ('val', frame.iloc[72:96]), ('test', frame.iloc[96:])]:
+    for name, data in [('train', frame.iloc[:96]), ('test', frame.iloc[96:])]:
         path = folder / f'{name}.csv'; data.to_csv(path, index=False); paths[name] = str(path)
     path = folder / 'schema.json'; path.write_text(json.dumps(configuration()[0])); paths['schema'] = str(path)
     return paths

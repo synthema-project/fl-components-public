@@ -1,6 +1,7 @@
 from random import choice
 from uuid import uuid4
 import json
+import os
 import structlog
 from flwr.common import (
     DEFAULT_TTL,
@@ -29,6 +30,11 @@ def execution_flow(
     per_node_recordset_factory=None,
     timeout=None,
 ):
+    if not node_ids:
+        raise RuntimeError(
+            "No Flower clients are registered with SuperLink. "
+            "Wait for clients to register; if SuperLink restarted, restart the clients after it is ready."
+        )
     messages = []
 
     for node_id in node_ids:
@@ -45,7 +51,7 @@ def execution_flow(
             message_type=msg_type,
             dst_node_id=node_id,
             group_id=msg_group,
-            ttl=DEFAULT_TTL,
+            ttl=max(DEFAULT_TTL, timeout + 60) if timeout is not None else DEFAULT_TTL,
         )
 
         messages.append(message)
@@ -261,7 +267,7 @@ def generate_synthetic_data(
             recordset_factory=interfaces.recordset.create_validate_synthetic_pool_recordset,
             msg_type=MessageType.QUERY, msg_group=f"validate_pool_{pool_id}",
             recordset_factory_args=(pool_id, object_uri, use_case),
-            check_success=True, timeout=1800,
+            check_success=True, timeout=int(os.getenv('VALIDATION_REPLY_TIMEOUT_SECONDS', '1800')),
         )
         for reply in replies:
             report = reply.content.configs_records["validation"]

@@ -39,3 +39,16 @@ async def test_rabbitmq_parser_preserves_requested_generation():
     assert task is not None
     assert task.num_synthetic_samples == 10000
 
+
+
+def test_execution_rejects_central_dp_with_smpc():
+    with pytest.raises(ValueError, match='SMPC cannot be enabled'):
+        TaskRead.model_validate({**BASE, 'SMPC_enabled': True, 'dp_mode': 'central_dp'})
+    defaults = TaskRead.model_validate(BASE)
+    assert defaults.SMPC_enabled is False
+    assert defaults.dp_mode is None
+
+
+def test_execution_accepts_explicit_smpc_opt_in():
+    task = TaskRead.model_validate({**BASE, 'SMPC_enabled': True, 'dp_mode': None})
+    assert task.SMPC_enabled is True
