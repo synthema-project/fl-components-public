@@ -227,11 +227,23 @@ def test_images(client: docker.DockerClient, config, tag):
                 client.images.get(full_tag)
 
                 print(f"[INFO] Running tests for image: {full_tag}")
-                client.containers.run(
+                container = client.containers.run(
                     image=full_tag,
-                    command="pytest tests",  # Replace with your actual test command
-                    remove=True,
+                    command=["python", "-m", "pytest", "tests", "-ra"],
+                    detach=True,
                 )
+                try:
+                    # ContainerError only includes stderr; pytest failures normally
+                    # go to stdout. Stream both before inspecting the exit status.
+                    for chunk in container.logs(stream=True, follow=True, stdout=True, stderr=True):
+                        print(chunk.decode('utf-8', errors='replace') if isinstance(chunk, bytes)
+                              else chunk, end='', flush=True)
+                    result = container.wait()
+                    if result['StatusCode'] != 0:
+                        raise RuntimeError(f"Unit tests failed for {full_tag} (exit {result['StatusCode']}); "
+                                           "see pytest output above")
+                finally:
+                    container.remove(force=True)
 
                 print(f"[OK] Tests passed for image: {full_tag}")
             except ImageNotFound:

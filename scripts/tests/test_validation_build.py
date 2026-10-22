@@ -48,6 +48,32 @@ def test_image_test_failure_propagates(monkeypatch):
         module.test_images(client,{'images':[{'name':'client','test':True}]},'test')
 
 
+@pytest.mark.parametrize('exit_code', [0, 1])
+def test_image_tests_stream_stdout_and_clean_up(monkeypatch, capsys, exit_code):
+    import sys, types
+    from unittest.mock import Mock
+    docker = types.ModuleType('docker'); docker.DockerClient = object
+    errors = types.ModuleType('docker.errors')
+    for name in ['ImageNotFound', 'APIError', 'BuildError']:
+        setattr(errors, name, type(name, (Exception,), {}))
+    monkeypatch.setitem(sys.modules, 'docker', docker)
+    monkeypatch.setitem(sys.modules, 'docker.errors', errors)
+    spec = importlib.util.spec_from_file_location('image_log_test', ROOT/'scripts/images.py')
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    client = Mock()
+    container = client.containers.run.return_value
+    container.logs.return_value = [b'test_example FAILED\n', b'assert 1 == 2\n']
+    container.wait.return_value = {'StatusCode': exit_code}
+    if exit_code:
+        with pytest.raises(RuntimeError, match='exit 1'):
+            module.test_images(client, {'images': [{'name': 'client', 'test': True}]}, 'ci-test')
+    else:
+        module.test_images(client, {'images': [{'name': 'client', 'test': True}]}, 'ci-test')
+    assert 'assert 1 == 2' in capsys.readouterr().out
+    container.logs.assert_called_once_with(stream=True, follow=True, stdout=True, stderr=True)
+    container.remove.assert_called_once_with(force=True)
+
+
 @pytest.mark.parametrize('profile', ['aml-full', 'scd-full'])
 def test_full_profile_requires_current_msi_contract_and_disease_extra(tmp_path, profile):
     wheel(tmp_path, 'model_store_interface')
