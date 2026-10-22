@@ -1,25 +1,25 @@
 """Exercise both identical lifecycle implementations without external services."""
 import ast
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
-
 @pytest.fixture(params=[
-    ROOT / "common/interfaces/mlflow_client.py",
-    ROOT / "apps/fl_server/src/fl_server/interfaces/mlflow_client.py",
+    "interfaces.mlflow_client",
+    "fl_server.interfaces.mlflow_client",
 ])
 def lifecycle(request):
-    tree = ast.parse(request.param.read_text())
+    source = Path(find_spec(request.param).origin)
+    tree = ast.parse(source.read_text())
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "clean_current_config")
     state = dict(
         _configured=SimpleNamespace(value=True),
         _current_config=SimpleNamespace(child_run_id="child", parent_run_id="parent", is_central_node=True),
         mlflow=Mock(), _mlflow_client=Mock(),
     )
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(request.param), "exec"), state)
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(source), "exec"), state)
     return state
 
 def test_failed_then_successful_run(lifecycle):
