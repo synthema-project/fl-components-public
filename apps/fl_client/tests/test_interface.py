@@ -116,7 +116,7 @@ def test_train_model_if_success(
 
     global_vars = dict()
     configs_records = {
-        "config": ConfigsRecord({"current_global_iter": 1}),
+        "config": ConfigsRecord({"current_global_iter": 1, "current_round": 2, "max_round": 5}),
     }
     msg = Message(
         metadata=Mock(spec=Metadata),
@@ -131,7 +131,7 @@ def test_train_model_if_success(
     assert len(global_vars.keys()) == 0
     assert set_model_parameters_mock.called
     assert get_model_parameters_mock.called
-    assert train_model_mock.called
+    train_model_mock.assert_called_once_with(global_vars, 1, 5)
     assert "parameters" in rsp.content.parameters_records.keys()
     assert "metrics" in rsp.content.metrics_records.keys()
 
