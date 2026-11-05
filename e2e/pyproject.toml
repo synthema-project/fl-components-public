@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11, <3.12"
 dependencies = [
-    "model-store-interface[edge]==0.6.5",
+    "model-store-interface[edge]==0.6.6",
 ]
 
 [tool.uv]

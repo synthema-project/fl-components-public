@@ -8,7 +8,7 @@ dependencies = [
     "pandas>=2.2.3,<3",
     "setuptools>=72.1.0,<73.0.0",
     "psutil>=6.0.0,<7.0.0",
-    "model-store-interface[edge]==0.6.5",
+    "model-store-interface[edge]==0.6.6",
     "grpcio-tools>=1.62.0,<2.0.0",
     "structlog>=25.1.0,<26.0.0",
     "minio>=7.2.20,<8.0.0",
