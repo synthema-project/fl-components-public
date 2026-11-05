@@ -12,7 +12,7 @@ dependencies = [
     "aio-pika>=9.5.4,<10",
     "docker>=7.1.0,<8",
     "structlog>=25.1.0,<26",
-    "model-store-interface[edge]==0.6.1",
+    "model-store-interface[edge]==0.6.5",
 ]
 
 [dependency-groups]

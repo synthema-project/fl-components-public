@@ -8,7 +8,7 @@ dependencies = [
     "pandas==2.3.3",
     "setuptools>=72.1.0,<73.0.0",
     "psutil>=6.0.0,<7.0.0",
-    "model-store-interface[edge]==0.6.1",
+    "model-store-interface[edge]==0.6.5",
     "grpcio-tools>=1.62.0,<2.0.0",
     "structlog>=25.1.0,<26.0.0",
     "minio>=7.2.20,<8.0.0",
@@ -40,8 +40,8 @@ addopts = [
 target-version = "py311"
 
 [project.optional-dependencies]
-aml-full = ["model-store-interface[aml]==0.6.1"]
-scd-full = ["model-store-interface[scd]==0.6.1"]
+aml-full = ["model-store-interface[aml]==0.6.5"]
+scd-full = ["model-store-interface[scd]==0.6.5"]
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]
