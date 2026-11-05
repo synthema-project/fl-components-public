@@ -5,7 +5,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "scikit-learn==1.9.1",
     "flwr>=1.9,<2.0",
-    "pandas==2.3.3",
+    "pandas<2.0.0",
     "mlflow-skinny>=2.19,<3.0",
     "numpy>=1,<2.0",
     "pydantic>=2.8.2,<3.0",
