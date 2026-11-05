@@ -5,7 +5,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "scikit-learn==1.9.1",
     "mlflow-skinny>=2.19,<3.0",
-    "pandas<2.0.0",
+    "pandas>=2.2.3,<3",
     "setuptools>=72.1.0,<73.0.0",
     "psutil>=6.0.0,<7.0.0",
     "model-store-interface[edge]==0.6.5",
